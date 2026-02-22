@@ -1,0 +1,342 @@
+<?xml version="1.0" encoding="utf-8"?>
+<search>
+  <entry>
+    <title>Hexo + Github Action 实现推送后自动更新博客静态资源</title>
+    <url>/2024/07/181421/</url>
+    <content><![CDATA[<p>这几天完成了hexo博客的自动化部署，实现了Hexo + Github Action 推送(git push)后自动更新博客静态资源，记录一下，主要是分享工作流的配置，话不多说，开干。</p>
+<span id="more"></span>
+
+<h2 id="1-创建Github仓库"><a href="#1-创建Github仓库" class="headerlink" title="1. 创建Github仓库"></a>1. 创建Github仓库</h2><p>首先，在Github上创建两个仓库，分别用于存放博客源文件和生成的静态资源。</p>
+<ul>
+<li>博客源文件仓库：用于存放博客的源文件，例如：<code>hexo-blog</code>。<br>这个仓库可以设置为私有的，防止_config.yml文件中某些隐私设置泄露。待会还需要再这个仓库中设置秘密变量和工作流。</li>
+<li>静态资源仓库：用于存放生成的静态资源，格式为：<code>Github用户名.github.io</code>。 例如：我的就是 <code>xswangcode.github.io</code>。<ol>
+<li>注意：静态资源仓库的名称必须是 <code>Github用户名.github.io</code>，否则无法使用Github Action的部署功能。</li>
+<li>两个仓库的主分支都为 <code>main</code>。</li>
+</ol>
+</li>
+</ul>
+<h2 id="2-配置工作流"><a href="#2-配置工作流" class="headerlink" title="2. 配置工作流"></a>2. 配置工作流</h2><p>Github Action <span class="exturl" data-url="aHR0cHM6Ly9kb2NzLmdpdGh1Yi5jb20vemgvYWN0aW9ucy9sZWFybi1naXRodWItYWN0aW9ucy9pbnRyb2R1Y3Rpb24tdG8tZ2l0aHViLWFjdGlvbnM=">官方文档<i class="fa fa-external-link-alt"></i></span></p>
+<h3 id="2-1-创建工作流文件"><a href="#2-1-创建工作流文件" class="headerlink" title="2.1 创建工作流文件"></a>2.1 创建工作流文件</h3><p>在博客源文件仓库[hexo-blog]中，创建一个 <code>.github/workflows/deploy.yml</code>文件，内容如下：</p>
+<figure class="highlight yml"><table><tr><td class="code"><pre><span class="line"><span class="attr">name:</span> <span class="string">Build</span> <span class="string">and</span> <span class="string">Deploy</span> <span class="string">View</span> </span><br><span class="line"></span><br><span class="line"><span class="attr">on:</span></span><br><span class="line">  <span class="attr">workflow_dispatch:</span></span><br><span class="line">  <span class="attr">push:</span></span><br><span class="line">    <span class="attr">branches:</span></span><br><span class="line">      <span class="bullet">-</span> <span class="string">main</span> </span><br><span class="line"></span><br><span class="line">  <span class="attr">schedule:</span></span><br><span class="line">    <span class="bullet">-</span> <span class="attr">cron:</span> <span class="string">&#x27;0 4,16 * * *&#x27;</span> <span class="comment"># 每天12点和24点自动执行</span></span><br><span class="line">    </span><br><span class="line"><span class="attr">permissions:</span> <span class="string">read-all</span></span><br><span class="line"></span><br><span class="line"><span class="attr">jobs:</span></span><br><span class="line">  <span class="attr">build:</span></span><br><span class="line">    <span class="attr">runs-on:</span> <span class="string">ubuntu-20.04</span></span><br><span class="line">    <span class="attr">permissions:</span></span><br><span class="line">      <span class="attr">contents:</span> <span class="string">read</span></span><br><span class="line">  </span><br><span class="line">    <span class="attr">steps:</span></span><br><span class="line">    <span class="bullet">-</span> <span class="attr">name:</span> <span class="string">Checkout</span> <span class="string">repository</span></span><br><span class="line">      <span class="attr">uses:</span> <span class="string">actions/checkout@v2</span></span><br><span class="line">      <span class="attr">with:</span></span><br><span class="line">        <span class="attr">ref:</span> <span class="string">main</span></span><br><span class="line">        <span class="attr">repository:</span> <span class="string">xswangcode/hexo-blog</span></span><br><span class="line">        <span class="attr">timezoneLinux:</span> <span class="string">&quot;Asia/Shanghai&quot;</span></span><br><span class="line"></span><br><span class="line"></span><br><span class="line">    <span class="bullet">-</span> <span class="attr">name:</span> <span class="string">Set</span> <span class="string">up</span> <span class="string">Node.js</span></span><br><span class="line">      <span class="attr">uses:</span> <span class="string">actions/setup-node@v1</span></span><br><span class="line">      <span class="attr">with:</span></span><br><span class="line">        <span class="attr">node-version:</span> <span class="number">20</span></span><br><span class="line"></span><br><span class="line">    <span class="bullet">-</span> <span class="attr">name:</span> <span class="string">Cache</span> <span class="string">node_modules</span> </span><br><span class="line">      <span class="attr">uses:</span> <span class="string">actions/cache@v2</span> </span><br><span class="line">      <span class="attr">env:</span></span><br><span class="line">        <span class="attr">cache-name:</span> <span class="string">cache-node-modules</span></span><br><span class="line">      <span class="attr">with:</span></span><br><span class="line">        <span class="attr">path:</span> <span class="string">~/.npm</span></span><br><span class="line">        <span class="attr">key:</span> <span class="string">$&#123;&#123;</span> <span class="string">runner.os</span> <span class="string">&#125;&#125;-build-$&#123;&#123;</span> <span class="string">env.cache-name</span> <span class="string">&#125;&#125;-$&#123;&#123;</span> <span class="string">hashFiles(&#x27;**/package-lock.json&#x27;)</span> <span class="string">&#125;&#125;</span></span><br><span class="line">        <span class="attr">restore-keys:</span> <span class="string">|</span></span><br><span class="line"><span class="string">          $&#123;&#123; runner.os &#125;&#125;-build-$&#123;&#123; env.cache-name &#125;&#125;-</span></span><br><span class="line"><span class="string">          $&#123;&#123; runner.os &#125;&#125;-build-</span></span><br><span class="line"><span class="string">          $&#123;&#123; runner.os &#125;&#125;- </span></span><br><span class="line"><span class="string"></span></span><br><span class="line">  </span><br><span class="line">    <span class="bullet">-</span> <span class="attr">name:</span> <span class="string">Install</span> <span class="string">dependencies</span></span><br><span class="line">      <span class="attr">run:</span> <span class="string">npm</span> <span class="string">i</span>  <span class="string">package.json</span> <span class="string">-g</span> </span><br><span class="line">    </span><br><span class="line">    <span class="bullet">-</span> <span class="attr">name:</span> <span class="string">Install</span> <span class="string">Hexo-cli</span> <span class="comment"># 安装 Hexo</span></span><br><span class="line">      <span class="attr">run:</span> <span class="string">|</span></span><br><span class="line"><span class="string">        npm install hexo-deployer-git </span></span><br><span class="line"><span class="string">        npm install  hexo-cli -g</span></span><br><span class="line"><span class="string">        echo &quot;install hexo successful&quot;</span></span><br><span class="line"><span class="string"></span>      </span><br><span class="line">    <span class="bullet">-</span> <span class="attr">name:</span> <span class="string">Build</span> <span class="string">Blog</span></span><br><span class="line">      <span class="attr">run:</span> <span class="string">|</span></span><br><span class="line"><span class="string">        hexo clean</span></span><br><span class="line"><span class="string">        hexo g</span></span><br><span class="line"><span class="string">        echo &quot;build blog successful&quot;</span></span><br><span class="line"><span class="string"></span></span><br><span class="line">    <span class="bullet">-</span> <span class="attr">name:</span> <span class="string">Deploy</span> <span class="string">DoubleAm&#x27;s</span> <span class="string">Blog</span> <span class="comment"># 设置 git 信息并推送静态博客文件</span></span><br><span class="line">      <span class="attr">env:</span></span><br><span class="line">        <span class="attr">GIT_NAME:</span>  <span class="string">xswangcode</span></span><br><span class="line">        <span class="attr">GIT_EMAIL:</span> <span class="string">$&#123;&#123;</span> <span class="string">secrets.GH_EMAIL</span> <span class="string">&#125;&#125;</span></span><br><span class="line">        <span class="attr">GH_TOKEN:</span>  <span class="string">$&#123;&#123;</span> <span class="string">secrets.GH_TOKEN</span> <span class="string">&#125;&#125;</span></span><br><span class="line">      <span class="attr">run:</span> <span class="string">|</span></span><br><span class="line"><span class="string">          git config --global user.name &quot;$GIT_NAME&quot;</span></span><br><span class="line"><span class="string">          git config --global user.email &quot;$GIT_EMAIL&quot;</span></span><br><span class="line"><span class="string">          sed -i -e &quot;s/https:\/\/github.com/https:\/\/$&#123;&#123; env.GH_TOKEN &#125;&#125;@github.com/g&quot; _config.yml</span></span><br><span class="line"><span class="string">          hexo deploy</span></span><br><span class="line"><span class="string"></span>      </span><br><span class="line">    <span class="bullet">-</span> <span class="attr">run:</span> <span class="string">|</span></span><br><span class="line"><span class="string">        echo &quot;Deploy Successful!&quot;</span></span><br><span class="line"><span class="string">        echo &quot;Visit website: https://xswangcode.github.io !&quot;</span></span><br><span class="line"><span class="string">        echo &quot;Visit website: https://xswang.pages.dev     !&quot;</span></span><br></pre></td></tr></table></figure>
+
+<p>上边的很多配置也参考了其他人的配置，感谢各位大佬的分享。</p>
+<h3 id="2-2-修改工作流内容"><a href="#2-2-修改工作流内容" class="headerlink" title="2.2 修改工作流内容"></a>2.2 修改工作流内容</h3><p>下面说下要改的位置</p>
+<ol>
+<li>25行：<code>repository: xswangcode/hexo-blog</code> 替换成你自己的仓库地址，如果你按照上面的步骤做的话，就把用户名改成你自己的就行。</li>
+<li>64行：这里是配置git用户，需要把用户名改成你自己的。</li>
+<li>75行：同上，这一行是输出最后网站的路径。这个不影响最终部署，但是会显示在 github action 的日志中。</li>
+</ol>
+<ul>
+<li>如果觉得太麻烦，也提供一个最简单的方案：在编辑器中打开deploy.yml 文件，搜索 <code>xswangcode</code>,全部替换成你自己的名字就够了，也可以正常执行。</li>
+</ul>
+<h3 id="2-3-准备Github-Token"><a href="#2-3-准备Github-Token" class="headerlink" title="2.3 准备Github Token"></a>2.3 准备Github Token</h3><p>可以看到我在65行和70行都是在配置Github Token，这个Token是用来在部署时，让Github Action 能够提交代码到你的仓库的。<br>先要创建一个Token，在Github的设置中，找到 <code>Developer settings</code>，然后找到 <code>Personal access tokens</code>，点击 <code>Generate new token</code>，然后输入一个Token的名称，选择 <code>repo</code> 和 <code>workflow</code> 权限，然后点击 <code>Generate token</code>，生成一个Token，这个Token只会显示一次，所以要保存好。</p>
+<p><img data-src="/../img/1721289445565.png"><br><img data-src="/../img/1721289482755.png"></p>
+<h3 id="2-4-配置Github-Secrets"><a href="#2-4-配置Github-Secrets" class="headerlink" title="2.4 配置Github Secrets"></a>2.4 配置Github Secrets</h3><p>在Github的仓库中，找到 <code>Settings</code>，然后找到 <code>Secrets，</code>，点击 <code>New repository secret</code>，然后输入一个名称，这里我输入的是 <code>GH_TOKEN</code>，然后把之前生成的Token粘贴到 <code>Value</code>中，点击 <code>Add secret</code>，这样就配置好了。<br>然后按照相同的步骤添加GH_EMAIL变量。</p>
+<p><img data-src="/../img/1721289334528.png"></p>
+<h3 id="2-5-检查hexo-配置"><a href="#2-5-检查hexo-配置" class="headerlink" title="2.5 检查hexo 配置"></a>2.5 检查hexo 配置</h3><p>如果你的hexo博客的所有配置已经修改完成了，并且也在根目录的_config.yml配置了deploy相关内容，如下。</p>
+<figure class="highlight yml"><table><tr><td class="code"><pre><span class="line"><span class="attr">deploy:</span></span><br><span class="line">  <span class="attr">type:</span> <span class="string">git</span></span><br><span class="line">  <span class="attr">repo:</span> <span class="string">https://github.com/xswangcode/xswangcode.github.io.git</span>  <span class="comment"># 这里改成你自己的仓库地址！</span></span><br><span class="line">  <span class="attr">branch:</span> <span class="string">main</span></span><br><span class="line">  <span class="attr">message:</span>  <span class="string">&quot;🎉update by Github Action💯 - <span class="template-variable">&#123;&#123; now(&#x27;yyyy-MM-dd hh:mm:ss&#x27;) &#125;&#125;</span>&quot;</span> </span><br></pre></td></tr></table></figure>
+
+<h3 id="2-6-设置Github-Pages"><a href="#2-6-设置Github-Pages" class="headerlink" title="2.6 设置Github Pages"></a>2.6 设置Github Pages</h3><p>在静态资源的 <code>xswangcode.github.io</code>仓库中，找到 <code>Settings</code>，然后找到 <code>Pages</code>，然后把 <code>Source</code> 设置为 <code>main branch / root </code>，然后点击 <code>Save</code>。 设置完成后如下：<br><img data-src="/../img/1721352422742.png"></p>
+<h3 id="2-7-见证奇迹的时刻"><a href="#2-7-见证奇迹的时刻" class="headerlink" title="2.7 见证奇迹的时刻"></a>2.7 见证奇迹的时刻</h3><p>在hexo-blog 目录下，执行</p>
+<figure class="highlight shell"><table><tr><td class="code"><pre><span class="line">hexo new test</span><br></pre></td></tr></table></figure>
+
+<p>然后执行然后把新增加的文件提交并推送到Github仓库。静等1分钟左右，进去https:&#x2F;&#x2F;{你的用户名}.github.io&#x2F; 看看吧。</p>
+]]></content>
+      <categories>
+        <category>hexo</category>
+        <category>博客</category>
+      </categories>
+      <tags>
+        <tag>hexo</tag>
+        <tag>Github-Action</tag>
+        <tag>workflows</tag>
+        <tag>自动化</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>Windows 窗口透明度调节工具：轻松调整窗口透明化</title>
+    <url>/2025/02/191622/</url>
+    <content><![CDATA[<p>这是一款 <strong>Windows 窗口透明度调节工具</strong>！它通过简单的快捷键或系统托盘操作，让你在不打扰工作的情况下，轻松调整任何窗口的透明度。是不是很实用？</p>
+<p>想要直接下载这款神器？没时间看正文章节？没问题！<a href="#download">查看下载方式</a></p>
+<h2 id="为什么需要透明度工具？"><a href="#为什么需要透明度工具？" class="headerlink" title="为什么需要透明度工具？"></a><strong>为什么需要透明度工具？</strong></h2><p>想象一下，在你做一件事情时，桌面上堆满了各种窗口，屏幕一片杂乱无章。或许你正在使用数位板画画，想对着指定的图片描画练习。那么，这个工具就能帮你完美解决这个烦恼——通过透明化某些窗口，让它们悄无声息地存在，但又不完全消失，既方便操作，又不影响桌面整洁。</p>
+<h2 id="这款工具有啥亮点？"><a href="#这款工具有啥亮点？" class="headerlink" title="这款工具有啥亮点？"></a><strong>这款工具有啥亮点？</strong></h2><h5 id="快捷键随心调节透明度"><a href="#快捷键随心调节透明度" class="headerlink" title="快捷键随心调节透明度"></a>快捷键随心调节透明度</h5><ul>
+<li><strong>降低透明度</strong>：按 <code>Ctrl + Alt + Up</code>，让窗口变得更加透明。</li>
+<li><strong>增加透明度</strong>：按 <code>Ctrl + Alt + Down</code>，让窗口变得更不透明。</li>
+<li><strong>恢复默认透明度</strong>：按 <code>Ctrl + Alt + 0</code>，恢复窗口的默认透明度。</li>
+</ul>
+<h5 id="系统托盘图标，安静待命"><a href="#系统托盘图标，安静待命" class="headerlink" title="系统托盘图标，安静待命"></a><strong>系统托盘图标，安静待命</strong></h5><p>程序启动后，它会默默缩到系统托盘，图标看不见，想偷懒就偷懒。你只需要右键点击托盘图标选择“退出”或者快捷键【ctrl + alt + esc】即可，不会打扰你正在做的事情。</p>
+<h5 id="打包为-EXE，随时随地使用"><a href="#打包为-EXE，随时随地使用" class="headerlink" title="打包为 EXE，随时随地使用"></a><strong>打包为 EXE，随时随地使用</strong></h5><p>不想麻烦安装 Python 环境？没问题！这个工具可以直接打包为一个 EXE 文件，免安装，随时随地运行。</p>
+<!-- 在文章结尾处设置锚点 -->
+
+<p><a id="download"></a></p>
+<h2 id="如何下载并使用这个工具？"><a href="#如何下载并使用这个工具？" class="headerlink" title="如何下载并使用这个工具？"></a><strong>如何下载并使用这个工具？</strong></h2><h5 id="下载方式"><a href="#下载方式" class="headerlink" title="下载方式"></a><strong>下载方式</strong></h5><ol>
+<li>访问 <span class="exturl" data-url="aHR0cHM6Ly9naXRodWIuY29tL3hzd2FuZ2NvZGUvd2luZG93X3RyYW5zcGFyZW5jeV90b29s">GitHub 仓库<i class="fa fa-external-link-alt"></i></span>，安装python 环境自行编译 EXE 文件, 根据readme文件调试修改源码。</li>
+<li>如果没有 Python 环境，也可以直接下载 <span class="exturl" data-url="aHR0cHM6Ly9naXRodWIuY29tL3hzd2FuZ2NvZGUvd2luZG93X3RyYW5zcGFyZW5jeV90b29sL3JlbGVhc2Vz">EXE<i class="fa fa-external-link-alt"></i></span> 最新版本运行(<code>推荐</code>，下载就用)。</li>
+</ol>
+<h2 id="调试学习"><a href="#调试学习" class="headerlink" title="调试学习"></a><strong>调试学习</strong></h2><h4 id="安装依赖（如果需要）"><a href="#安装依赖（如果需要）" class="headerlink" title="安装依赖（如果需要）"></a><strong>安装依赖（如果需要）</strong></h4><p>如果你选择源码版本， 请阅读git仓库内的<span class="exturl" data-url="aHR0cHM6Ly9naXRodWIuY29tL3hzd2FuZ2NvZGUvd2luZG93X3RyYW5zcGFyZW5jeV90b29s">readme<i class="fa fa-external-link-alt"></i></span>文件</p>
+<h4 id="使用方法"><a href="#使用方法" class="headerlink" title="使用方法"></a><strong>使用方法</strong></h4><ol>
+<li>运行 <code>main.py</code> 文件（或下载 EXE 文件直接运行）。</li>
+<li>使用快捷键调节窗口透明度，或通过托盘图标退出程序。</li>
+</ol>
+<h2 id="总结"><a href="#总结" class="headerlink" title="总结"></a><strong>总结</strong></h2><p>这款 <strong>Windows 窗口透明度工具</strong> 是一款非常实用的桌面工具，尤其适合那些希望提升工作效率、保持桌面整洁的朋友。通过简单的快捷键或托盘操作，你就能轻松调整窗口透明度，无论是工作还是摸鱼，都能得到很好的体验。如果你也想在桌面上“隐形”一些窗口，就快来试试这款工具！</p>
+<hr>
+<p><strong>作者</strong> 王宁<br><strong>联系邮箱</strong>：<span class="exturl" data-url="bWFpbHRvOiYjeDc3OyYjMTIwOyYjeDczOyYjOTU7JiN4NjM7JiMxMTE7JiN4NjQ7JiMxMDE7JiM2NDsmI3gzMTsmI3gzMjsmI3gzNjsmIzQ2OyYjOTk7JiN4NmY7JiN4NmQ7">&#x77;&#120;&#x73;&#95;&#x63;&#111;&#x64;&#101;&#64;&#x31;&#x32;&#x36;&#46;&#99;&#x6f;&#x6d;<i class="fa fa-external-link-alt"></i></span></p>
+]]></content>
+      <categories>
+        <category>工具推荐</category>
+      </categories>
+      <tags>
+        <tag>Windows</tag>
+        <tag>透明度工具</tag>
+        <tag>窗口管理</tag>
+        <tag>快捷键</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>Java常用中间件对比与选型指南</title>
+    <url>/2025/02/141314/</url>
+    <content><![CDATA[<!-- # Java常用中间件对比与选型指南 -->
+
+<p>在Java生态中，中间件是构建分布式系统的基石。本文将对常用中间件进行横向对比，分析其核心差异与适用场景，方便找到<code>最适合业务</code>的解决方案。</p>
+<span id="more"></span>
+
+<hr>
+<h2 id="消息队列中间件"><a href="#消息队列中间件" class="headerlink" title="消息队列中间件"></a>消息队列中间件</h2><h3 id="1-Kafka"><a href="#1-Kafka" class="headerlink" title="1. Kafka"></a>1. Kafka</h3><p>Kafka以其高吞吐量和持久化能力著称，特别适合大数据日志采集和流处理场景。它的多副本机制确保了数据的高可靠性，但消息延迟较高，通常在毫秒级别。对于需要实时性极高的场景（如金融交易），Kafka可能不是最佳选择。Kafka的扩展性很强，但功能扩展依赖社区插件，可能需要额外的开发成本。</p>
+<p><strong>短评</strong>：搞大数据？没得选，Kafka就是你的菜。不过，准备好熬夜调优吧，这货可不是省油的灯。</p>
+<ul>
+<li><strong>官网地址</strong>: <span class="exturl" data-url="aHR0cHM6Ly9rYWZrYS5hcGFjaGUub3JnLw==">https://kafka.apache.org/<i class="fa fa-external-link-alt"></i></span></li>
+<li><strong>文档地址</strong>: <span class="exturl" data-url="aHR0cHM6Ly9rYWZrYS5hcGFjaGUub3JnL2RvY3VtZW50YXRpb24v">https://kafka.apache.org/documentation/<i class="fa fa-external-link-alt"></i></span></li>
+</ul>
+<h3 id="2-RocketMQ"><a href="#2-RocketMQ" class="headerlink" title="2. RocketMQ"></a>2. RocketMQ</h3><p>RocketMQ在低延迟和事务消息支持上表现优异，特别适合金融、电商等需要高可靠性和顺序消息的场景。它的毫秒级延迟和事务消息机制是其核心竞争力。不过，RocketMQ的社区生态相对较弱，且运维复杂度较高，适合有一定技术储备的团队。</p>
+<p><strong>短评</strong>：低延迟、事务消息，金融场景的神器。不过，社区生态弱了点，出了问题得自己扛。</p>
+<ul>
+<li><strong>官网地址</strong>: <span class="exturl" data-url="aHR0cHM6Ly9yb2NrZXRtcS5hcGFjaGUub3JnLw==">https://rocketmq.apache.org/<i class="fa fa-external-link-alt"></i></span></li>
+<li><strong>文档地址</strong>: <span class="exturl" data-url="aHR0cHM6Ly9yb2NrZXRtcS5hcGFjaGUub3JnL2RvY3Mv">https://rocketmq.apache.org/docs/<i class="fa fa-external-link-alt"></i></span></li>
+</ul>
+<h3 id="3-RabbitMQ"><a href="#3-RabbitMQ" class="headerlink" title="3. RabbitMQ"></a>3. RabbitMQ</h3><p>RabbitMQ作为老牌消息队列，以其灵活的路由机制和友好的管理界面著称，特别适合企业级系统集成。它支持完整的AMQP协议，但在单机吞吐量上表现较弱，通常只能达到万级TPS。对于需要高吞吐量的场景，RabbitMQ可能不是最佳选择。</p>
+<p><strong>短评</strong>：适合中小企业，功能齐全，但别指望它能扛住双十一的流量。</p>
+<ul>
+<li><strong>官网地址</strong>: <span class="exturl" data-url="aHR0cHM6Ly93d3cucmFiYml0bXEuY29tLw==">https://www.rabbitmq.com/<i class="fa fa-external-link-alt"></i></span></li>
+<li><strong>文档地址</strong>: <span class="exturl" data-url="aHR0cHM6Ly93d3cucmFiYml0bXEuY29tL2RvY3VtZW50YXRpb24uaHRtbA==">https://www.rabbitmq.com/documentation.html<i class="fa fa-external-link-alt"></i></span></li>
+</ul>
+<p><strong>总结</strong>: Kafka适合大数据场景，RocketMQ适合金融交易等低延迟场景，而RabbitMQ则更适合企业级系统集成。选择时需根据业务需求和团队技术栈进行权衡。</p>
+<hr>
+<h2 id="缓存中间件"><a href="#缓存中间件" class="headerlink" title="缓存中间件"></a>缓存中间件</h2><h3 id="1-Redis"><a href="#1-Redis" class="headerlink" title="1. Redis"></a>1. Redis</h3><p>Redis是缓存中间件的事实标准，支持丰富的数据结构（如字符串、哈希、列表等），并且单线程模型保证了操作的原子性。它的集群方案成熟（如Codis和Redis Cluster），适合高并发场景。不过，Redis的内存成本较高，且持久化可能影响性能，需要根据业务场景合理配置。</p>
+<p><strong>短评</strong>：缓存界的万金油，啥场景都能上。不过，内存贵啊，老板心疼(还好不是我们2333)。</p>
+<ul>
+<li><strong>官网地址</strong>: <span class="exturl" data-url="aHR0cHM6Ly9yZWRpcy5pby8=">https://redis.io/<i class="fa fa-external-link-alt"></i></span></li>
+<li><strong>文档地址</strong>: <span class="exturl" data-url="aHR0cHM6Ly9yZWRpcy5pby9kb2N1bWVudGF0aW9u">https://redis.io/documentation<i class="fa fa-external-link-alt"></i></span></li>
+</ul>
+<h3 id="2-Memcached"><a href="#2-Memcached" class="headerlink" title="2. Memcached"></a>2. Memcached</h3><p>Memcached是一个高性能的分布式内存缓存系统，特别适合缓存简单的键值对数据。它的设计简单，性能极高，适合读多写少的场景。不过，Memcached不支持持久化和复杂的数据结构，且集群功能较弱，适合小型项目或临时缓存需求。</p>
+<p><strong>短评</strong>：简单粗暴，适合临时缓存需求。不过，功能太单一，别指望它能干复杂的活儿。</p>
+<ul>
+<li><strong>官网地址</strong>: <span class="exturl" data-url="aHR0cHM6Ly9tZW1jYWNoZWQub3JnLw==">https://memcached.org/<i class="fa fa-external-link-alt"></i></span></li>
+<li><strong>文档地址</strong>: <span class="exturl" data-url="aHR0cHM6Ly9naXRodWIuY29tL21lbWNhY2hlZC9tZW1jYWNoZWQvd2lraQ==">https://github.com/memcached/memcached/wiki<i class="fa fa-external-link-alt"></i></span></li>
+</ul>
+<h3 id="3-Ehcache"><a href="#3-Ehcache" class="headerlink" title="3. Ehcache"></a>3. Ehcache</h3><p>Ehcache是一个纯Java的缓存框架，集成简单，适合单机或小型分布式系统。它支持本地缓存和分布式缓存，且与Spring等框架集成良好。不过，Ehcache的分布式缓存功能较弱，且在大规模集群下性能表现不如Redis。</p>
+<p><strong>短评</strong>：单机缓存的好选择，但分布式场景就别指望它了。</p>
+<ul>
+<li><strong>官网地址</strong>: <span class="exturl" data-url="aHR0cHM6Ly93d3cuZWhjYWNoZS5vcmcv">https://www.ehcache.org/<i class="fa fa-external-link-alt"></i></span></li>
+<li><strong>文档地址</strong>: <span class="exturl" data-url="aHR0cHM6Ly93d3cuZWhjYWNoZS5vcmcvZG9jdW1lbnRhdGlvbi8=">https://www.ehcache.org/documentation/<i class="fa fa-external-link-alt"></i></span></li>
+</ul>
+<h3 id="4-Caffeine"><a href="#4-Caffeine" class="headerlink" title="4. Caffeine"></a>4. Caffeine</h3><p>Caffeine是一个基于Java 8的高性能本地缓存库，设计目标是替代Guava Cache。它的性能极高，支持异步加载和过期策略，适合高并发本地缓存场景。不过，Caffeine仅支持本地缓存，无法用于分布式系统。</p>
+<p><strong>短评</strong>：本地缓存的神器，性能杠杠的。不过，分布式场景就别想了。</p>
+<ul>
+<li><strong>官网地址</strong>: <span class="exturl" data-url="aHR0cHM6Ly9naXRodWIuY29tL2Jlbi1tYW5lcy9jYWZmZWluZQ==">https://github.com/ben-manes/caffeine<i class="fa fa-external-link-alt"></i></span></li>
+<li><strong>文档地址</strong>: <span class="exturl" data-url="aHR0cHM6Ly9naXRodWIuY29tL2Jlbi1tYW5lcy9jYWZmZWluZS93aWtp">https://github.com/ben-manes/caffeine/wiki<i class="fa fa-external-link-alt"></i></span></li>
+</ul>
+<h3 id="5-Hazelcast"><a href="#5-Hazelcast" class="headerlink" title="5. Hazelcast"></a>5. Hazelcast</h3><p>Hazelcast是一个分布式内存数据网格，支持缓存、分布式计算和消息队列等功能。它的分布式缓存功能强大，且支持自动分片和数据备份，适合大规模分布式系统。不过，Hazelcast的配置和运维较为复杂，且内存占用较高。</p>
+<p><strong>短评</strong>：功能强大，但运维是个坑，适合有经验的团队。</p>
+<ul>
+<li><strong>官网地址</strong>: <span class="exturl" data-url="aHR0cHM6Ly9oYXplbGNhc3QuY29tLw==">https://hazelcast.com/<i class="fa fa-external-link-alt"></i></span></li>
+<li><strong>文档地址</strong>: <span class="exturl" data-url="aHR0cHM6Ly9kb2NzLmhhemVsY2FzdC5jb20vaGF6ZWxjYXN0L2xhdGVzdC8=">https://docs.hazelcast.com/hazelcast/latest/<i class="fa fa-external-link-alt"></i></span></li>
+</ul>
+<h3 id="6-Ignite"><a href="#6-Ignite" class="headerlink" title="6. Ignite"></a>6. Ignite</h3><p>Apache Ignite是一个分布式内存计算平台，支持缓存、SQL查询和机器学习等功能。它的功能非常丰富，适合需要复杂数据处理和计算的场景。不过，Ignite的学习曲线较陡峭，且对硬件资源要求较高。</p>
+<p><strong>短评</strong>：功能强大，但学习成本高，适合技术储备足的团队。</p>
+<ul>
+<li><strong>官网地址</strong>: <span class="exturl" data-url="aHR0cHM6Ly9pZ25pdGUuYXBhY2hlLm9yZy8=">https://ignite.apache.org/<i class="fa fa-external-link-alt"></i></span></li>
+<li><strong>文档地址</strong>: <span class="exturl" data-url="aHR0cHM6Ly9pZ25pdGUuYXBhY2hlLm9yZy9kb2NzL2xhdGVzdC8=">https://ignite.apache.org/docs/latest/<i class="fa fa-external-link-alt"></i></span></li>
+</ul>
+<p><strong>总结</strong>:</p>
+<ul>
+<li><strong>Redis</strong>: 大多数场景的首选，支持丰富数据结构和高并发。</li>
+<li><strong>Memcached</strong>: 适合简单的键值对缓存，性能极高但功能单一。</li>
+<li><strong>Ehcache</strong>: 适合单机或小型分布式系统，集成简单但分布式功能较弱。</li>
+<li><strong>Caffeine</strong>: 本地缓存的最佳选择，性能优异但不支持分布式。</li>
+<li><strong>Hazelcast</strong>: 适合大规模分布式系统，功能强大但运维复杂。</li>
+<li><strong>Ignite</strong>: 适合复杂数据处理和计算场景，功能丰富但学习成本高。</li>
+</ul>
+<p>选择缓存中间件时，需根据业务需求、团队技术栈和运维能力进行权衡。对于大多数Java项目，Redis和Caffeine是优先考虑的选择。</p>
+<hr>
+<h2 id="数据库中间件"><a href="#数据库中间件" class="headerlink" title="数据库中间件"></a>数据库中间件</h2><h3 id="1-ShardingSphere"><a href="#1-ShardingSphere" class="headerlink" title="1. ShardingSphere"></a>1. ShardingSphere</h3><p>ShardingSphere是一个功能强大的分库分表中间件，支持多种分片策略，并且兼容MySQL协议。它的SQL改写能力非常完善，适合复杂的分布式数据库场景。不过，分布式事务的实现较为复杂，且跨库Join的效率较低，需要根据业务场景进行优化。</p>
+<p><strong>短评</strong>：分库分表的神器，功能强大，但调优得花点时间。</p>
+<ul>
+<li><strong>官网地址</strong>: <span class="exturl" data-url="aHR0cHM6Ly9zaGFyZGluZ3NwaGVyZS5hcGFjaGUub3JnLw==">https://shardingsphere.apache.org/<i class="fa fa-external-link-alt"></i></span></li>
+<li><strong>文档地址</strong>: <span class="exturl" data-url="aHR0cHM6Ly9zaGFyZGluZ3NwaGVyZS5hcGFjaGUub3JnL2RvY3VtZW50L2N1cnJlbnQv">https://shardingsphere.apache.org/document/current/<i class="fa fa-external-link-alt"></i></span></li>
+</ul>
+<h3 id="2-MyCat"><a href="#2-MyCat" class="headerlink" title="2. MyCat"></a>2. MyCat</h3><p>MyCat是一个轻量级的数据库中间件，配置简单，适合快速上手。它支持读写分离，但在复杂查询场景下性能较差，且社区活跃度逐渐下降，适合小型项目或存量系统的维护。</p>
+<p><strong>短评</strong>：适合小型项目，但别指望它能扛住大流量。</p>
+<ul>
+<li><strong>官网地址</strong>: <span class="exturl" data-url="aHR0cDovL3d3dy5teWNhdC5vcmcuY24v">http://www.mycat.org.cn/<i class="fa fa-external-link-alt"></i></span></li>
+<li><strong>文档地址</strong>: <span class="exturl" data-url="aHR0cDovL3d3dy5teWNhdC5vcmcuY24vZG9jdW1lbnQv">http://www.mycat.org.cn/document/<i class="fa fa-external-link-alt"></i></span></li>
+</ul>
+<p><strong>总结</strong>: 新项目推荐使用ShardingSphere，其功能强大且扩展性好；对于小型项目或存量系统，MyCat是一个轻量级的选择。</p>
+<hr>
+<h2 id="RPC框架"><a href="#RPC框架" class="headerlink" title="RPC框架"></a>RPC框架</h2><h3 id="1-Dubbo"><a href="#1-Dubbo" class="headerlink" title="1. Dubbo"></a>1. Dubbo</h3><p>Dubbo是Java生态中最成熟的RPC框架之一，服务治理能力非常完善，特别适合微服务架构。它的中文文档丰富，支持多种协议（如Dubbo协议、HTTP等），但配置较为复杂，且生态碎片化问题较为明显。</p>
+<p><strong>短评</strong>：微服务的神器，功能齐全，但配置得花点时间。</p>
+<ul>
+<li><strong>官网地址</strong>: <span class="exturl" data-url="aHR0cHM6Ly9kdWJiby5hcGFjaGUub3JnLw==">https://dubbo.apache.org/<i class="fa fa-external-link-alt"></i></span></li>
+<li><strong>文档地址</strong>: <span class="exturl" data-url="aHR0cHM6Ly9kdWJiby5hcGFjaGUub3JnL3poL2RvY3Mv">https://dubbo.apache.org/zh/docs/<i class="fa fa-external-link-alt"></i></span></li>
+</ul>
+<h3 id="2-gRPC"><a href="#2-gRPC" class="headerlink" title="2. gRPC"></a>2. gRPC</h3><p>gRPC是一个跨语言的RPC框架，基于HTTP&#x2F;2协议，性能优异。它使用Protobuf作为序列化工具，适合跨语言服务调用场景。不过，gRPC的服务治理功能较弱，需要二次开发，且调试成本较高。</p>
+<p><strong>短评</strong>：跨语言的神器，性能炸裂，但调试得花点心思。</p>
+<ul>
+<li><strong>官网地址</strong>: <span class="exturl" data-url="aHR0cHM6Ly9ncnBjLmlvLw==">https://grpc.io/<i class="fa fa-external-link-alt"></i></span></li>
+<li><strong>文档地址</strong>: <span class="exturl" data-url="aHR0cHM6Ly9ncnBjLmlvL2RvY3Mv">https://grpc.io/docs/<i class="fa fa-external-link-alt"></i></span></li>
+</ul>
+<p><strong>总结</strong>: 对于Java微服务架构，Dubbo是首选；如果需要跨语言支持，gRPC是更好的选择。</p>
+<hr>
+<h2 id="注册中心"><a href="#注册中心" class="headerlink" title="注册中心"></a>注册中心</h2><h3 id="1-Nacos"><a href="#1-Nacos" class="headerlink" title="1. Nacos"></a>1. Nacos</h3><p>Nacos是一个功能强大的注册中心，同时支持服务发现和配置管理。它的可视化控制台非常友好，且支持CP&#x2F;AP模式切换，适合大多数微服务场景。不过，在大规模集群下，Nacos的性能可能会有所衰减。</p>
+<p><strong>短评</strong>：微服务的神器，功能强大，配置简单。</p>
+<ul>
+<li><strong>官网地址</strong>: <span class="exturl" data-url="aHR0cHM6Ly9uYWNvcy5pby8=">https://nacos.io/<i class="fa fa-external-link-alt"></i></span></li>
+<li><strong>文档地址</strong>: <span class="exturl" data-url="aHR0cHM6Ly9uYWNvcy5pby96aC1jbi9kb2NzL3doYXQtaXMtbmFjb3MuaHRtbA==">https://nacos.io/zh-cn/docs/what-is-nacos.html<i class="fa fa-external-link-alt"></i></span></li>
+</ul>
+<h3 id="2-Zookeeper"><a href="#2-Zookeeper" class="headerlink" title="2. Zookeeper"></a>2. Zookeeper</h3><p>Zookeeper是一个老牌的分布式协调服务，强一致性是其核心优势，适合需要高可靠性的场景。不过，Zookeeper的写性能较差，且运维复杂度较高，适合有经验的团队。</p>
+<p><strong>短评</strong>：功能强大，但运维麻烦，适合有经验的团队。</p>
+<ul>
+<li><strong>官网地址</strong>: <span class="exturl" data-url="aHR0cHM6Ly96b29rZWVwZXIuYXBhY2hlLm9yZy8=">https://zookeeper.apache.org/<i class="fa fa-external-link-alt"></i></span></li>
+<li><strong>文档地址</strong>: <span class="exturl" data-url="aHR0cHM6Ly96b29rZWVwZXIuYXBhY2hlLm9yZy9kb2Mv">https://zookeeper.apache.org/doc/<i class="fa fa-external-link-alt"></i></span></li>
+</ul>
+<p><strong>总结</strong>: 对于大多数微服务场景，Nacos是更好的选择；如果需要强一致性，Zookeeper仍然是一个可靠的选择。</p>
+<hr>
+<h2 id="配置中心"><a href="#配置中心" class="headerlink" title="配置中心"></a>配置中心</h2><h3 id="Apollo"><a href="#Apollo" class="headerlink" title="Apollo"></a>Apollo</h3><p>Apollo是一个功能强大的配置中心，支持配置的灰度发布和版本追溯，特别适合中大型企业。它的多环境支持能力非常强大，但部署架构较重，学习曲线较陡峭。</p>
+<p><strong>短评</strong>：配置中心的神器，功能强大，但部署麻烦。</p>
+<ul>
+<li><strong>官网地址</strong>: <span class="exturl" data-url="aHR0cHM6Ly93d3cuYXBvbGxvY29uZmlnLmNvbS8=">https://www.apolloconfig.com/<i class="fa fa-external-link-alt"></i></span></li>
+<li><strong>文档地址</strong>: <span class="exturl" data-url="aHR0cHM6Ly93d3cuYXBvbGxvY29uZmlnLmNvbS8jL3poL1JFQURNRQ==">https://www.apolloconfig.com/#/zh/README<i class="fa fa-external-link-alt"></i></span></li>
+</ul>
+<p><strong>总结</strong>: Apollo适合中大型企业，对于轻量级场景，可以考虑使用Nacos的配置管理功能。</p>
+<hr>
+<h2 id="分布式事务"><a href="#分布式事务" class="headerlink" title="分布式事务"></a>分布式事务</h2><h3 id="Seata"><a href="#Seata" class="headerlink" title="Seata"></a>Seata</h3><p>Seata是一个开源的分布式事务解决方案，支持AT和TCC模式，适合需要强一致性的业务场景。它的开源社区活跃，且与Spring Cloud集成良好，但性能损耗较明显，且对业务代码有一定的侵入性。</p>
+<p><strong>短评</strong>：分布式事务的神器，功能强大，但性能损耗明显。</p>
+<ul>
+<li><strong>官网地址</strong>: <span class="exturl" data-url="aHR0cHM6Ly9zZWF0YS5pby8=">https://seata.io/<i class="fa fa-external-link-alt"></i></span></li>
+<li><strong>文档地址</strong>: <span class="exturl" data-url="aHR0cHM6Ly9zZWF0YS5pby96aC1jbi9kb2NzL292ZXJ2aWV3L3doYXQtaXMtc2VhdGEuaHRtbA==">https://seata.io/zh-cn/docs/overview/what-is-seata.html<i class="fa fa-external-link-alt"></i></span></li>
+</ul>
+<p><strong>总结</strong>: 对于金融级场景，推荐使用TCC模式；对于常规业务，AT模式可以降低开发成本。</p>
+<hr>
+<h2 id="综合选型建议"><a href="#综合选型建议" class="headerlink" title="综合选型建议"></a>综合选型建议</h2><ol>
+<li><strong>消息队列</strong>：优先考虑RocketMQ，平衡吞吐量与功能完整性。</li>
+<li><strong>缓存</strong>：Redis仍是首选，注意合理设计过期策略。</li>
+<li><strong>微服务架构</strong>：Dubbo + Nacos组合拳。</li>
+<li><strong>分布式事务</strong>：非核心业务可暂缓引入，必须使用时推荐Seata AT模式。</li>
+</ol>
+<p>技术选型没有银弹，得根据业务需求和团队技术栈来定。不过，记住一点：别为了技术而技术，<strong>解决问题</strong>才是王道。祝大家少踩坑，多摸鱼！😄</p>
+]]></content>
+      <categories>
+        <category>介绍</category>
+      </categories>
+      <tags>
+        <tag>java</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>谷歌浏览器使用Video标签拖动进度条重新播放问题</title>
+    <url>/2024/08/190935/</url>
+    <content><![CDATA[<h3 id="问题描述"><a href="#问题描述" class="headerlink" title="问题描述"></a>问题描述</h3><p>这两天自己写<span class="exturl" data-url="aHR0cHM6Ly9naXRodWIuY29tL3hzd2FuZ2NvZGUvb25lc2l0ZS5naXQ=">onesite<i class="fa fa-external-link-alt"></i></span> 的时候遇到一个小问题。原框架使用video.js来播放视频，在网络环境下可以正常播放视频，且可以拖动或点击进度条能正常跳转。但是使用koa-static代理的本地视频文件则无法使用进度条，<code>一旦修改进度，那么就会重头开始播放</code>。</p>
+<span id="more"></span>
+<p>整理了一个现象的表格如下：</p>
+<table>
+<thead>
+<tr>
+<th>浏览器</th>
+<th>视频来源</th>
+<th>是否可用</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>谷歌</td>
+<td>网络</td>
+<td>可用</td>
+</tr>
+<tr>
+<td>谷歌</td>
+<td>koa-static托管</td>
+<td>不可用</td>
+</tr>
+<tr>
+<td>火狐</td>
+<td>网络</td>
+<td>可用</td>
+</tr>
+<tr>
+<td>火狐</td>
+<td>koa-static托管</td>
+<td>可用</td>
+</tr>
+</tbody></table>
+<h3 id="原因"><a href="#原因" class="headerlink" title="原因"></a>原因</h3><p>这么一看就清晰了，应该是谷歌浏览器或者使用本地静态资源托管的时候出错了。先搜一下别人有没有遇到过吧。不出所料，打开bing，输入关键词，回车。 稍微看了一下搜索结果，主要原因是：koa-static返回了一个文件流，并且没有设置response的header配置，谷歌浏览器不知道总文件的大小，它就每次都重头开始播放。火狐没问题，可能他们考虑到了这种情况，做了兼容。</p>
+<h3 id="解决"><a href="#解决" class="headerlink" title="解决"></a>解决</h3><p>知道了问题就好解决了，在托管资源文件的时候，添加header配置就行。 我这里使用的后端是koa + koa-static + koa-mount 。koa-static用来托管文件，koa-mount同来为静态文件添加统一的前缀。完整的代码配置如下</p>
+<figure class="highlight js"><table><tr><td class="code"><pre><span class="line"><span class="keyword">const</span> <span class="title class_">Koa</span> = <span class="built_in">require</span>(<span class="string">&#x27;koa&#x27;</span>); </span><br><span class="line"><span class="keyword">const</span> <span class="keyword">static</span> = <span class="built_in">require</span>(<span class="string">&#x27;koa-static&#x27;</span>)</span><br><span class="line"><span class="keyword">const</span> <span class="title class_">Mount</span> = <span class="built_in">require</span>(<span class="string">&#x27;koa-mount&#x27;</span>);</span><br><span class="line"></span><br><span class="line"><span class="keyword">const</span> app = <span class="keyword">new</span> <span class="title class_">Koa</span>();</span><br><span class="line"></span><br><span class="line">app.<span class="title function_">use</span>(<span class="title class_">Mount</span>(<span class="string">&quot;/video/&quot;</span>,<span class="title function_">static</span>(<span class="variable constant_">CONFIG</span>.<span class="property">VISIT_PATH</span>, &#123;</span><br><span class="line">  <span class="attr">prefix</span>: <span class="string">&quot;/video&quot;</span>,</span><br><span class="line">  <span class="attr">index</span>: <span class="literal">false</span>,     <span class="comment">// 默认为true  访问的文件为index.html  可以修改为别的文件名或者false</span></span><br><span class="line">  <span class="attr">hidden</span>: <span class="literal">true</span>,     <span class="comment">// 是否同意传输隐藏文件</span></span><br><span class="line">  <span class="attr">defer</span>: <span class="literal">true</span>,      <span class="comment">// 如果为true，则在返回next()之后进行服务，从而允许后续中间件先进行响应</span></span><br><span class="line">  <span class="attr">setHeaders</span>: <span class="function">(<span class="params">ctx, filepath, stat</span>)=&gt;</span>&#123; <span class="comment">// stat:包含文件的信息</span></span><br><span class="line">    ctx.<span class="title function_">setHeader</span>(<span class="string">&#x27;Content-Type&#x27;</span>, <span class="string">&#x27;video/mp4&#x27;</span>); <span class="comment">// 设置Content-Type</span></span><br><span class="line">    ctx.<span class="title function_">setHeader</span>(<span class="string">&#x27;Content-Length&#x27;</span>, stat.<span class="property">size</span>); <span class="comment">// 设置Content-Length</span></span><br><span class="line">    ctx.<span class="title function_">setHeader</span>(<span class="string">&quot;Accept-Ranges&quot;</span>, <span class="string">&quot;bytes&quot;</span>);    </span><br><span class="line">  &#125;</span><br><span class="line">&#125;)))</span><br><span class="line"></span><br><span class="line"><span class="keyword">const</span> <span class="variable constant_">SERVER_PORT</span> = <span class="number">80</span></span><br><span class="line">app.<span class="title function_">listen</span>(<span class="variable constant_">SERVER_PORT</span>, <span class="function">() =&gt;</span> &#123; </span><br><span class="line">  <span class="variable language_">console</span>.<span class="title function_">log</span>(<span class="string">&quot;Start App From koa&quot;</span>);</span><br><span class="line">&#125;);</span><br></pre></td></tr></table></figure>
+
+<p>其实不论你用的啥后端框架，主要思想就是设置响应头，照着上面的内容设置就可以了。</p>
+]]></content>
+      <categories>
+        <category>小知识</category>
+      </categories>
+      <tags>
+        <tag>Google</tag>
+        <tag>video</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>Hello World</title>
+    <url>/2024/07/171805/</url>
+    <content><![CDATA[<p>Welcome to <span class="exturl" data-url="aHR0cHM6Ly9oZXhvLmlvLw==">Hexo<i class="fa fa-external-link-alt"></i></span>! This is your very first post. Check <span class="exturl" data-url="aHR0cHM6Ly9oZXhvLmlvL2RvY3Mv">documentation<i class="fa fa-external-link-alt"></i></span> for more info. If you get any problems when using Hexo, you can find the answer in <span class="exturl" data-url="aHR0cHM6Ly9oZXhvLmlvL2RvY3MvdHJvdWJsZXNob290aW5nLmh0bWw=">troubleshooting<i class="fa fa-external-link-alt"></i></span> or you can ask me on <span class="exturl" data-url="aHR0cHM6Ly9naXRodWIuY29tL2hleG9qcy9oZXhvL2lzc3Vlcw==">GitHub<i class="fa fa-external-link-alt"></i></span>.</p>
+<span id="more"></span>
+
+<h2 id="Quick-Start"><a href="#Quick-Start" class="headerlink" title="Quick Start"></a>Quick Start</h2><h3 id="Create-a-new-post"><a href="#Create-a-new-post" class="headerlink" title="Create a new post"></a>Create a new post</h3><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ hexo new <span class="string">&quot;My New Post&quot;</span></span><br></pre></td></tr></table></figure>
+
+<p>More info: <span class="exturl" data-url="aHR0cHM6Ly9oZXhvLmlvL2RvY3Mvd3JpdGluZy5odG1s">Writing<i class="fa fa-external-link-alt"></i></span></p>
+<h3 id="Run-server"><a href="#Run-server" class="headerlink" title="Run server"></a>Run server</h3><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ hexo server</span><br></pre></td></tr></table></figure>
+
+<p>More info: <span class="exturl" data-url="aHR0cHM6Ly9oZXhvLmlvL2RvY3Mvc2VydmVyLmh0bWw=">Server<i class="fa fa-external-link-alt"></i></span></p>
+<h3 id="Generate-static-files"><a href="#Generate-static-files" class="headerlink" title="Generate static files"></a>Generate static files</h3><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ hexo generate</span><br></pre></td></tr></table></figure>
+
+<p>More info: <span class="exturl" data-url="aHR0cHM6Ly9oZXhvLmlvL2RvY3MvZ2VuZXJhdGluZy5odG1s">Generating<i class="fa fa-external-link-alt"></i></span></p>
+<h3 id="Deploy-to-remote-sites"><a href="#Deploy-to-remote-sites" class="headerlink" title="Deploy to remote sites"></a>Deploy to remote sites</h3><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ hexo deploy</span><br></pre></td></tr></table></figure>
+
+<p>More info: <span class="exturl" data-url="aHR0cHM6Ly9oZXhvLmlvL2RvY3Mvb25lLWNvbW1hbmQtZGVwbG95bWVudC5odG1s">Deployment<i class="fa fa-external-link-alt"></i></span></p>
+]]></content>
+      <categories>
+        <category>hexo</category>
+      </categories>
+      <tags>
+        <tag>hexo</tag>
+        <tag>hello</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title></title>
+    <url>//404.html</url>
+    <content><![CDATA[<h1 id="404-Not-Found：该页无法显示"><a href="#404-Not-Found：该页无法显示" class="headerlink" title="404 Not Found：该页无法显示"></a>404 Not Found：该页无法显示</h1><p><a href="/"> <code>&lt; 返回首页</code></a> </p>
+]]></content>
+  </entry>
+  <entry>
+    <title>关于我</title>
+    <url>/about/index.html</url>
+    <content><![CDATA[<p>勤恳的码农之一。全栈偏后端，java方向。 平时喜欢折腾一下新技术，全凭兴趣爱好。</p>
+<img alt="添加微信：wxscode，回复消息更及时！" height="200" data-src="../img/1721289228873.jpg" width="150"/>]]></content>
+  </entry>
+  <entry>
+    <title>分类</title>
+    <url>/categories/index.html</url>
+    <content><![CDATA[]]></content>
+  </entry>
+  <entry>
+    <title>标签</title>
+    <url>/tags/index.html</url>
+    <content><![CDATA[]]></content>
+  </entry>
+</search>
