@@ -1,0 +1,1122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 7.3.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/all.min.css">
+  <link rel="stylesheet" href="/lib/fancybox/jquery.fancybox.min.css">
+
+<script id="hexo-configurations">
+    var NexT = window.NexT || {};
+    var CONFIG = {"hostname":"blog.babynan.top","root":"/","scheme":"Gemini","version":"7.8.0","exturl":true,"sidebar":{"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},"copycode":{"enable":true,"show_result":true,"style":"mac"},"back2top":{"enable":true,"sidebar":true,"scrollpercent":true},"bookmark":{"enable":false,"color":"#222","save":"auto"},"fancybox":true,"mediumzoom":false,"lazyload":true,"pangu":true,"comments":{"style":"tabs","active":"valine","storage":true,"lazyload":false,"nav":null},"algolia":{"hits":{"per_page":10},"labels":{"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}},"localsearch":{"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":true},"motion":{"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}},"path":"search.xml"};
+  </script>
+
+  <meta name="description" content="记录一次Docker容器访问宝塔MySQL数据库超时问题的完整排查过程。 通过分析Docker网络、MySQL监听配置、用户权限以及应用实际配置， 最终定位为错误使用Docker bridge网关地址172.17.0.1导致容器访问链路异常， 修改为Docker内部服务名baota后恢复正常。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Docker容器访问宝塔MySQL超时问题排查与解决实战">
+<meta property="og:url" content="https://blog.babynan.top/2026/07/311502/index.html">
+<meta property="og:site_name" content="Coding王">
+<meta property="og:description" content="记录一次Docker容器访问宝塔MySQL数据库超时问题的完整排查过程。 通过分析Docker网络、MySQL监听配置、用户权限以及应用实际配置， 最终定位为错误使用Docker bridge网关地址172.17.0.1导致容器访问链路异常， 修改为Docker内部服务名baota后恢复正常。">
+<meta property="og:locale" content="zh_CN">
+<meta property="article:published_time" content="2026-07-31T07:02:07.000Z">
+<meta property="article:modified_time" content="2026-07-31T07:02:07.000Z">
+<meta property="article:author" content="王宁">
+<meta property="article:tag" content="Docker">
+<meta property="article:tag" content="MySQL">
+<meta property="article:tag" content="宝塔">
+<meta property="article:tag" content="容器网络">
+<meta property="article:tag" content="网络排查">
+<meta property="article:tag" content="故障处理">
+<meta name="twitter:card" content="summary">
+
+<link rel="canonical" href="https://blog.babynan.top/2026/07/311502/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome : false,
+    isPost : true,
+    lang   : 'zh-CN'
+  };
+</script>
+
+  <title>Docker容器访问宝塔MySQL超时问题排查与解决实战 | Coding王</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+<link rel="alternate" href="/atom.xml" title="Coding王" type="application/atom+xml">
+<link rel="alternate" href="/rss2.xml" title="Coding王" type="application/rss+xml">
+<style>.darkmode--activated{--body-bg-color:#282828;--content-bg-color:#333;--card-bg-color:#555;--text-color:#ccc;--blockquote-color:#bbb;--link-color:#ccc;--link-hover-color:#eee;--brand-color:#ddd;--brand-hover-color:#ddd;--table-row-odd-bg-color:#282828;--table-row-hover-bg-color:#363636;--menu-item-bg-color:#555;--btn-default-bg:#222;--btn-default-color:#ccc;--btn-default-border-color:#555;--btn-default-hover-bg:#666;--btn-default-hover-color:#ccc;--btn-default-hover-border-color:#666;--highlight-background:#282b2e;--highlight-foreground:#a9b7c6;--highlight-gutter-background:#34393d;--highlight-gutter-foreground:#9ca9b6}.darkmode--activated img{opacity:.75}.darkmode--activated img:hover{opacity:.9}.darkmode--activated code{color:#69dbdc;background:0 0}button.darkmode-toggle{z-index:9999}.darkmode-ignore,img{display:flex!important}.beian img{display:inline-block!important}</style></head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+
+  <div class="site-meta">
+
+    <a href="/" class="brand" rel="start">
+      <span class="logo-line-before"><i></i></span>
+      <h1 class="site-title">Coding王</h1>
+      <span class="logo-line-after"><i></i></span>
+    </a>
+      <p class="site-subtitle" itemprop="description">日常+随笔</p>
+  </div>
+
+  <div class="site-nav-right">
+    <div class="toggle popup-trigger">
+        <i class="fa fa-search fa-fw fa-lg"></i>
+    </div>
+  </div>
+</div>
+
+
+
+
+<nav class="site-nav">
+  <ul id="menu" class="main-menu menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-home fa-fw"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-user fa-fw"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-tags fa-fw"></i>标签<span class="badge">21</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-th fa-fw"></i>分类<span class="badge">11</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-archive fa-fw"></i>归档<span class="badge">10</span></a>
+
+  </li>
+        <li class="menu-item menu-item-sitemap">
+
+    <a href="/sitemap.xml" rel="section"><i class="fa fa-sitemap fa-fw"></i>站点地图</a>
+
+  </li>
+        <li class="menu-item menu-item-commonweal">
+
+    <a href="/404" rel="section"><i class="fa fa-heartbeat fa-fw"></i>公益 404</a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+</nav>
+
+
+
+  <div class="search-pop-overlay">
+    <div class="popup search-popup">
+        <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocapitalize="off"
+           placeholder="搜索..." spellcheck="false"
+           type="search" class="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result">
+  <div id="no-result">
+    <i class="fa fa-spinner fa-pulse fa-5x fa-fw"></i>
+  </div>
+</div>
+
+    </div>
+  </div>
+
+</div>
+    </header>
+
+    
+  <div class="reading-progress-bar"></div>
+
+  <span class="exturl github-corner" data-url="aHR0cHM6Ly9naXRodWIuY29tL3hzd2FuZ2NvZGU=" title="关注我的GitHub" aria-label="关注我的GitHub"><svg width="80" height="80" viewBox="0 0 250 250" aria-hidden="true"><path d="M0,0 L115,115 L130,115 L142,142 L250,250 L250,0 Z"></path><path d="M128.3,109.0 C113.8,99.7 119.0,89.6 119.0,89.6 C122.0,82.7 120.5,78.6 120.5,78.6 C119.2,72.0 123.4,76.3 123.4,76.3 C127.3,80.9 125.5,87.3 125.5,87.3 C122.9,97.6 130.6,101.9 134.4,103.2" fill="currentColor" style="transform-origin: 130px 106px;" class="octo-arm"></path><path d="M115.0,115.0 C114.9,115.1 118.7,116.5 119.8,115.4 L133.7,101.6 C136.9,99.2 139.9,98.4 142.2,98.6 C133.8,88.0 127.5,74.4 143.8,58.0 C148.5,53.4 154.0,51.2 159.7,51.0 C160.3,49.4 163.2,43.6 171.4,40.1 C171.4,40.1 176.1,42.5 178.8,56.2 C183.1,58.6 187.2,61.8 190.9,65.4 C194.5,69.0 197.7,73.2 200.1,77.6 C213.8,80.2 216.3,84.9 216.3,84.9 C212.7,93.1 206.9,96.0 205.4,96.6 C205.1,102.4 203.0,107.8 198.3,112.5 C181.9,128.9 168.3,122.5 157.7,114.1 C157.9,116.9 156.7,120.9 152.7,124.9 L141.0,136.5 C139.8,137.7 141.6,141.9 141.8,141.8 Z" fill="currentColor" class="octo-body"></path></svg></span>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content post posts-expand">
+            
+
+    
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block" lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="https://blog.babynan.top/2026/07/311502/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="https://imgbed.babynan.top/file/1750831381779_53158089.gif">
+      <meta itemprop="name" content="王宁">
+      <meta itemprop="description" content="知行合一">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="Coding王">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          Docker容器访问宝塔MySQL超时问题排查与解决实战
+        </h1>
+
+        <div class="post-meta">
+          
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="far fa-calendar"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2026-07-31 15:02:07" itemprop="dateCreated datePublished" datetime="2026-07-31T15:02:07+08:00">2026-07-31</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="far fa-folder"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Docker/" itemprop="url" rel="index"><span itemprop="name">Docker</span></a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Docker/%E8%BF%90%E7%BB%B4%E6%8E%92%E9%9A%9C/" itemprop="url" rel="index"><span itemprop="name">运维排障</span></a>
+                </span>
+            </span>
+
+          
+            <span class="post-meta-item" title="阅读次数" id="busuanzi_container_page_pv" style="display: none;">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-eye"></i>
+              </span>
+              <span class="post-meta-item-text">阅读次数：</span>
+              <span id="busuanzi_value_page_pv"></span>
+            </span>
+  
+  <span class="post-meta-item">
+    
+      <span class="post-meta-item-icon">
+        <i class="far fa-comment"></i>
+      </span>
+      <span class="post-meta-item-text">Disqus：</span>
+    
+    <a title="disqus" href="/2026/07/311502/#disqus_thread" itemprop="discussionUrl">
+      <span class="post-comments-count disqus-comment-count" data-disqus-identifier="2026/07/311502/" itemprop="commentCount"></span>
+    </a>
+  </span>
+  
+  <br>
+            <span class="post-meta-item" title="本文字数">
+              <span class="post-meta-item-icon">
+                <i class="far fa-file-word"></i>
+              </span>
+                <span class="post-meta-item-text">本文字数：</span>
+              <span>3.2k</span>
+            </span>
+            <span class="post-meta-item" title="阅读时长">
+              <span class="post-meta-item-icon">
+                <i class="far fa-clock"></i>
+              </span>
+                <span class="post-meta-item-text">阅读时长 &asymp;</span>
+              <span>12 分钟</span>
+            </span>
+            <div class="post-description">记录一次Docker容器访问宝塔MySQL数据库超时问题的完整排查过程。 通过分析Docker网络、MySQL监听配置、用户权限以及应用实际配置， 最终定位为错误使用Docker bridge网关地址172.17.0.1导致容器访问链路异常， 修改为Docker内部服务名baota后恢复正常。
+</div>
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h1 id="Docker-容器访问宝塔-MySQL-接口超时事故解决报告"><a href="#Docker-容器访问宝塔-MySQL-接口超时事故解决报告" class="headerlink" title="Docker 容器访问宝塔 MySQL 接口超时事故解决报告"></a>Docker 容器访问宝塔 MySQL 接口超时事故解决报告</h1><h2 id="1-事故基本信息"><a href="#1-事故基本信息" class="headerlink" title="1. 事故基本信息"></a>1. 事故基本信息</h2><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>事故名称</td>
+<td>Docker 后端容器访问宝塔 MySQL 接口超时</td>
+</tr>
+<tr>
+<td>发生日期</td>
+<td>2026年7月31日</td>
+</tr>
+<tr>
+<td>影响服务</td>
+<td><code>sca-backend</code>、<code>fds-backend</code></td>
+</tr>
+<tr>
+<td>数据库服务</td>
+<td>宝塔容器内 MySQL 5.7</td>
+</tr>
+<tr>
+<td>主要现象</td>
+<td>后端接口响应超过40秒，部分请求直接超时</td>
+</tr>
+<tr>
+<td>最终状态</td>
+<td>已解决，应用接口恢复正常</td>
+</tr>
+<tr>
+<td>根本原因</td>
+<td>应用实际连接了错误的 Docker 网关地址 <code>172.17.0.1</code>，未通过容器服务名直接访问 MySQL 容器</td>
+</tr>
+</tbody></table>
+<hr>
+<h2 id="2-事故概述"><a href="#2-事故概述" class="headerlink" title="2. 事故概述"></a>2. 事故概述</h2><p><code>sca-backend</code> 和 <code>fds-backend</code> 均以 Docker 容器方式运行，MySQL 数据库运行在同一台宿主机的 <code>baota</code> 容器中。</p>
+<p>事故发生后，应用接口在读取 MySQL 数据时出现长时间等待，部分接口耗时超过40秒，并出现 MySQL 初始通信阶段断开的问题。</p>
+<p>典型异常如下：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">pymysql.err.OperationalError:</span><br><span class="line">(2013, &quot;Lost connection to MySQL server at</span><br><span class="line">&#x27;waiting for initial communication packet&#x27;&quot;)</span><br></pre></td></tr></table></figure>
+
+<p>但直接在 MySQL 中执行相关 SQL 时，查询耗时不足1秒。因此，故障初期容易被误认为是 Docker 网络、MySQL 权限、数据库性能或接口代码性能问题。</p>
+<hr>
+<h2 id="3-系统部署背景"><a href="#3-系统部署背景" class="headerlink" title="3. 系统部署背景"></a>3. 系统部署背景</h2><p>事故发生时，主要容器部署关系如下：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line">Docker Host</span><br><span class="line">│</span><br><span class="line">├── sca-backend</span><br><span class="line">│      └── Python / FastAPI 后端</span><br><span class="line">│</span><br><span class="line">├── fds-backend</span><br><span class="line">│      └── Python / FastAPI 后端</span><br><span class="line">│</span><br><span class="line">└── baota</span><br><span class="line">       └── MySQL 5.7：3306</span><br></pre></td></tr></table></figure>
+
+<p>相关容器位于用户自定义 Docker 网络 <code>app_net</code> 中：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">app_net</span><br><span class="line">│</span><br><span class="line">├── sca-backend</span><br><span class="line">│</span><br><span class="line">├── fds-backend</span><br><span class="line">│</span><br><span class="line">└── baota</span><br><span class="line">       └── MySQL:3306</span><br></pre></td></tr></table></figure>
+
+<p>在该网络结构下，后端容器应通过 Docker 内部 DNS 和容器服务名访问数据库：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">baota:3306</span><br></pre></td></tr></table></figure>
+
+<p>不应通过宿主机地址、Docker 默认网关地址或动态容器 IP 绕行访问。</p>
+<hr>
+<h2 id="4-事故现象"><a href="#4-事故现象" class="headerlink" title="4. 事故现象"></a>4. 事故现象</h2><h3 id="4-1-应用接口异常"><a href="#4-1-应用接口异常" class="headerlink" title="4.1 应用接口异常"></a>4.1 应用接口异常</h3><p>应用接口调用数据库时出现以下问题：</p>
+<ul>
+<li>接口响应时间超过40秒；</li>
+<li>部分接口直接超时；</li>
+<li>后端偶发 MySQL 握手阶段连接中断；</li>
+<li><code>sca-backend</code> 和 <code>fds-backend</code> 均受到影响。</li>
+</ul>
+<h3 id="4-2-数据库直接查询正常"><a href="#4-2-数据库直接查询正常" class="headerlink" title="4.2 数据库直接查询正常"></a>4.2 数据库直接查询正常</h3><p>在 MySQL 中直接执行 SQL 时，查询可以快速完成。</p>
+<p>测试结果：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">execute: 0.013</span><br><span class="line">fetch: 0.0</span><br><span class="line">result: 85861</span><br></pre></td></tr></table></figure>
+
+<p>该结果说明：</p>
+<ul>
+<li>SQL 执行速度正常；</li>
+<li>MySQL 数据读取正常；</li>
+<li>数据库本身不存在明显性能瓶颈；</li>
+<li>85861条数据的统计查询仅耗时约0.013秒。</li>
+</ul>
+<p>因此，接口超时不是由 SQL 执行缓慢造成的。</p>
+<hr>
+<h2 id="5-排查过程"><a href="#5-排查过程" class="headerlink" title="5. 排查过程"></a>5. 排查过程</h2><h3 id="5-1-检查-MySQL-监听状态"><a href="#5-1-检查-MySQL-监听状态" class="headerlink" title="5.1 检查 MySQL 监听状态"></a>5.1 检查 MySQL 监听状态</h3><p>执行：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">ss -ntlp | grep 3306</span><br></pre></td></tr></table></figure>
+
+<p>返回：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">LISTEN 0 150 *:3306 *:* users:((&quot;mysqld&quot;,pid=1385,fd=19))</span><br></pre></td></tr></table></figure>
+
+<p>确认结果：</p>
+<ul>
+<li>MySQL 已监听 <code>3306</code> 端口；</li>
+<li>监听地址为全部网卡，而非仅监听 <code>127.0.0.1</code>；</li>
+<li>MySQL 监听配置不是本次故障的主要原因。</li>
+</ul>
+<h3 id="5-2-检查数据库账号和远程权限"><a href="#5-2-检查数据库账号和远程权限" class="headerlink" title="5.2 检查数据库账号和远程权限"></a>5.2 检查数据库账号和远程权限</h3><p>通过以下 SQL 检查账号来源限制：</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> <span class="keyword">user</span>, host</span><br><span class="line"><span class="keyword">FROM</span> mysql.user;</span><br></pre></td></tr></table></figure>
+
+<p>查询结果中，相关业务账号存在 <code>host=&#39;%&#39;</code> 的记录，说明数据库具备远程连接账号。</p>
+<p>排查过程中，phpMyAdmin 复制结果中出现了类似以下内容：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">server_privileges.php?username=xxx&amp;hostname=%25&amp;token=...</span><br></pre></td></tr></table></figure>
+
+<p>该内容更可能是 phpMyAdmin 页面中用户名超链接的地址被一同复制，而不能单独据此认定 MySQL 用户名已经被污染。</p>
+<p>虽然排查期间重新创建了部分远程账号，但后续测试证明，账号权限并不是造成接口超时的根本原因。</p>
+<h3 id="5-3-使用容器服务名进行手工连接测试"><a href="#5-3-使用容器服务名进行手工连接测试" class="headerlink" title="5.3 使用容器服务名进行手工连接测试"></a>5.3 使用容器服务名进行手工连接测试</h3><p>分别进入两个后端容器，直接通过 <code>baota</code> 服务名连接 MySQL。</p>
+<p><code>sca-backend</code> 测试结果：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">host=baota</span><br><span class="line">port=3306</span><br><span class="line">time=0.044s</span><br></pre></td></tr></table></figure>
+
+<p><code>fds-backend</code> 测试结果：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">host=baota</span><br><span class="line">port=3306</span><br><span class="line">time=0.045s</span><br></pre></td></tr></table></figure>
+
+<p>该测试确认：</p>
+<ul>
+<li>Docker 内部 DNS 解析正常；</li>
+<li><code>app_net</code> 网络通信正常；</li>
+<li>MySQL 监听正常；</li>
+<li>数据库账号和密码正常；</li>
+<li>两个后端容器均能快速连接 <code>baota:3306</code>。</li>
+</ul>
+<h3 id="5-4-发现手工测试与应用接口使用的配置不一致"><a href="#5-4-发现手工测试与应用接口使用的配置不一致" class="headerlink" title="5.4 发现手工测试与应用接口使用的配置不一致"></a>5.4 发现手工测试与应用接口使用的配置不一致</h3><p>虽然手工测试连接 <code>baota:3306</code> 仅需约0.045秒，但应用接口仍然超时。</p>
+<p>这说明手工测试所使用的连接参数，与应用进程实际读取的连接参数并不相同。</p>
+<p>随后直接读取应用运行时配置：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">python3 - &lt;&lt;<span class="string">&#x27;PY&#x27;</span></span><br><span class="line">from app.config import settings</span><br><span class="line"></span><br><span class="line"><span class="built_in">print</span>(<span class="string">&quot;host:&quot;</span>, settings.mysql_host)</span><br><span class="line"><span class="built_in">print</span>(<span class="string">&quot;port:&quot;</span>, settings.mysql_port)</span><br><span class="line"><span class="built_in">print</span>(<span class="string">&quot;db:&quot;</span>, settings.mysql_database)</span><br><span class="line"><span class="built_in">print</span>(<span class="string">&quot;user:&quot;</span>, settings.mysql_user)</span><br><span class="line">PY</span><br></pre></td></tr></table></figure>
+
+<p>实际输出：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">host: 172.17.0.1</span><br><span class="line">port: 3306</span><br><span class="line">db: glue_sca</span><br><span class="line">user: bandlinksca</span><br></pre></td></tr></table></figure>
+
+<p>至此确认，应用接口实际访问的是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">172.17.0.1:3306</span><br></pre></td></tr></table></figure>
+
+<p>而不是已经验证正常的：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">baota:3306</span><br></pre></td></tr></table></figure>
+
+<hr>
+<h2 id="6-根本原因分析"><a href="#6-根本原因分析" class="headerlink" title="6. 根本原因分析"></a>6. 根本原因分析</h2><h3 id="6-1-直接原因"><a href="#6-1-直接原因" class="headerlink" title="6.1 直接原因"></a>6.1 直接原因</h3><p>应用容器的数据库环境变量配置错误：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">MYSQL_HOST=172.17.0.1</span><br><span class="line">MYSQL_PORT=3306</span><br></pre></td></tr></table></figure>
+
+<p>其中：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">172.17.0.1</span><br></pre></td></tr></table></figure>
+
+<p>是 Docker 默认 <code>bridge</code> 网络的网关地址，不是 MySQL 容器在 <code>app_net</code> 中的服务地址。</p>
+<h3 id="6-2-错误访问路径"><a href="#6-2-错误访问路径" class="headerlink" title="6.2 错误访问路径"></a>6.2 错误访问路径</h3><p>错误配置产生的访问路径为：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line">sca-backend / fds-backend</span><br><span class="line">          │</span><br><span class="line">          ▼</span><br><span class="line">     172.17.0.1</span><br><span class="line">          │</span><br><span class="line">          ▼</span><br><span class="line">   Docker bridge 网关</span><br><span class="line">          │</span><br><span class="line">          ▼</span><br><span class="line">  宿主机网络及端口转发</span><br><span class="line">          │</span><br><span class="line">          ▼</span><br><span class="line">      baota / MySQL</span><br></pre></td></tr></table></figure>
+
+<p>该路径绕过了 Docker 用户自定义网络中的容器直连机制，增加了网关转发、端口映射和网络回流环节，并在实际应用请求中出现 MySQL 初始通信等待和连接中断。</p>
+<h3 id="6-3-正确访问路径"><a href="#6-3-正确访问路径" class="headerlink" title="6.3 正确访问路径"></a>6.3 正确访问路径</h3><p>正确路径应为：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">sca-backend ─┐</span><br><span class="line">             │</span><br><span class="line">fds-backend ─┼── app_net ── baota:3306</span><br><span class="line">             │</span><br><span class="line">             └── Docker 内部 DNS</span><br></pre></td></tr></table></figure>
+
+<p>应用应通过容器服务名 <code>baota</code> 直接连接数据库，而不是使用网关地址或固定容器 IP。</p>
+<h3 id="6-4-配置加载机制放大了问题"><a href="#6-4-配置加载机制放大了问题" class="headerlink" title="6.4 配置加载机制放大了问题"></a>6.4 配置加载机制放大了问题</h3><p>应用配置文件中存在以下逻辑：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line"><span class="meta">@dataclass(<span class="params">frozen=<span class="literal">True</span></span>)</span></span><br><span class="line"><span class="keyword">class</span> <span class="title class_">Settings</span>:</span><br><span class="line">    mysql_host: <span class="built_in">str</span> = os.getenv(<span class="string">&quot;MYSQL_HOST&quot;</span>, <span class="string">&quot;默认地址&quot;</span>)</span><br><span class="line">    mysql_port: <span class="built_in">int</span> = <span class="built_in">int</span>(os.getenv(<span class="string">&quot;MYSQL_PORT&quot;</span>, <span class="string">&quot;默认端口&quot;</span>))</span><br><span class="line"></span><br><span class="line">settings = Settings()</span><br></pre></td></tr></table></figure>
+
+<p><code>settings</code> 会在 Python 模块加载时读取一次环境变量。</p>
+<p>因此，即使后续修改了 <code>.env</code> 或 Docker Compose 配置，如果没有重新创建或重启后端进程，应用仍可能继续使用旧的数据库地址。</p>
+<hr>
+<h2 id="7-促成因素"><a href="#7-促成因素" class="headerlink" title="7. 促成因素"></a>7. 促成因素</h2><p>除直接配置错误外，以下因素增加了故障定位难度：</p>
+<ol>
+<li><p><strong>手工测试参数与应用运行参数不一致</strong></p>
+<p>手工测试使用 <code>baota:3306</code>，而应用实际使用 <code>172.17.0.1:3306</code>。手工测试成功只能证明指定参数可用，不能证明应用当前配置正确。</p>
+</li>
+<li><p><strong>配置文件存在不安全的默认连接地址</strong></p>
+<p>当环境变量缺失时，程序会自动使用代码中的默认公网地址、端口和账号。这会使配置错误被静默掩盖，而不是在启动阶段立即报错。</p>
+</li>
+<li><p><strong>修改环境变量后未确认运行时配置</strong></p>
+<p>只修改配置文件但未重新创建容器，可能导致应用继续使用旧值。</p>
+</li>
+<li><p><strong>启动日志未输出实际数据库目标</strong></p>
+<p>服务启动时没有明确记录当前数据库的 <code>host</code>、<code>port</code>、<code>database</code> 和 <code>user</code>，导致无法快速确认接口实际连接了哪个数据库。</p>
+</li>
+<li><p><strong>最初排查范围过宽</strong></p>
+<p>排查过程先后涉及监听端口、账号权限、数据库性能、连接池、SQL执行和业务代码，直到读取应用运行时配置后才锁定真正原因。</p>
+</li>
+</ol>
+<hr>
+<h2 id="8-解决措施"><a href="#8-解决措施" class="headerlink" title="8. 解决措施"></a>8. 解决措施</h2><h3 id="8-1-修改数据库连接地址"><a href="#8-1-修改数据库连接地址" class="headerlink" title="8.1 修改数据库连接地址"></a>8.1 修改数据库连接地址</h3><p>将后端服务中的数据库地址由：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">MYSQL_HOST=172.17.0.1</span><br><span class="line">MYSQL_PORT=3306</span><br></pre></td></tr></table></figure>
+
+<p>修改为：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">MYSQL_HOST=baota</span><br><span class="line">MYSQL_PORT=3306</span><br></pre></td></tr></table></figure>
+
+<p>数据库密码通过 Docker Secret 或环境变量安全注入，不在报告中记录明文。</p>
+<h3 id="8-2-确认容器处于同一网络"><a href="#8-2-确认容器处于同一网络" class="headerlink" title="8.2 确认容器处于同一网络"></a>8.2 确认容器处于同一网络</h3><p>确认以下容器均已加入 <code>app_net</code>：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">sca-backend</span><br><span class="line">fds-backend</span><br><span class="line">baota</span><br></pre></td></tr></table></figure>
+
+<p>检查命令：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">docker inspect sca-backend</span><br><span class="line">docker inspect fds-backend</span><br><span class="line">docker inspect baota</span><br></pre></td></tr></table></figure>
+
+<h3 id="8-3-重新创建后端容器"><a href="#8-3-重新创建后端容器" class="headerlink" title="8.3 重新创建后端容器"></a>8.3 重新创建后端容器</h3><p>修改 Docker Compose 配置后，重新创建相关服务：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">docker compose up -d --force-recreate sca-backend fds-backend</span><br></pre></td></tr></table></figure>
+
+<p>如服务分别位于不同 Compose 项目中，则分别执行重新创建命令。</p>
+<p>仅在确认环境变量已经写入现有容器的情况下，才可使用：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">docker restart sca-backend</span><br><span class="line">docker restart fds-backend</span><br></pre></td></tr></table></figure>
+
+<p>通常修改 Compose 环境变量后，应优先使用 <code>--force-recreate</code>，而不是只执行普通重启。</p>
+<h3 id="8-4-验证应用实际配置"><a href="#8-4-验证应用实际配置" class="headerlink" title="8.4 验证应用实际配置"></a>8.4 验证应用实际配置</h3><p>重新创建容器后执行：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">docker <span class="built_in">exec</span> -it sca-backend python3 - &lt;&lt;<span class="string">&#x27;PY&#x27;</span></span><br><span class="line">from app.config import settings</span><br><span class="line"></span><br><span class="line"><span class="built_in">print</span>(<span class="string">&quot;host:&quot;</span>, settings.mysql_host)</span><br><span class="line"><span class="built_in">print</span>(<span class="string">&quot;port:&quot;</span>, settings.mysql_port)</span><br><span class="line"><span class="built_in">print</span>(<span class="string">&quot;db:&quot;</span>, settings.mysql_database)</span><br><span class="line"><span class="built_in">print</span>(<span class="string">&quot;user:&quot;</span>, settings.mysql_user)</span><br><span class="line">PY</span><br></pre></td></tr></table></figure>
+
+<p>预期结果：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">host: baota</span><br><span class="line">port: 3306</span><br><span class="line">db: glue_sca</span><br><span class="line">user: bandlinksca</span><br></pre></td></tr></table></figure>
+
+<p><code>fds-backend</code> 使用同样方式验证。</p>
+<hr>
+<h2 id="9-修复后验证结果"><a href="#9-修复后验证结果" class="headerlink" title="9. 修复后验证结果"></a>9. 修复后验证结果</h2><h3 id="9-1-sca-backend-数据库连接"><a href="#9-1-sca-backend-数据库连接" class="headerlink" title="9.1 sca-backend 数据库连接"></a>9.1 <code>sca-backend</code> 数据库连接</h3><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">MySQL Host: baota</span><br><span class="line">连接耗时: 0.044s</span><br></pre></td></tr></table></figure>
+
+<h3 id="9-2-fds-backend-数据库连接"><a href="#9-2-fds-backend-数据库连接" class="headerlink" title="9.2 fds-backend 数据库连接"></a>9.2 <code>fds-backend</code> 数据库连接</h3><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">MySQL Host: baota</span><br><span class="line">连接耗时: 0.045s</span><br></pre></td></tr></table></figure>
+
+<h3 id="9-3-SQL-查询验证"><a href="#9-3-SQL-查询验证" class="headerlink" title="9.3 SQL 查询验证"></a>9.3 SQL 查询验证</h3><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">execute: 0.013s</span><br><span class="line">fetch: 0.0s</span><br><span class="line">count: 85861</span><br></pre></td></tr></table></figure>
+
+<h3 id="9-4-应用验证"><a href="#9-4-应用验证" class="headerlink" title="9.4 应用验证"></a>9.4 应用验证</h3><p>修复并重新加载配置后：</p>
+<ul>
+<li>两个后端容器均可正常连接 MySQL；</li>
+<li>MySQL 初始通信阶段异常消失；</li>
+<li>应用接口恢复正常；</li>
+<li>未再出现原有的长时间等待和接口超时问题。</li>
+</ul>
+<hr>
+<h2 id="10-前因后果总结"><a href="#10-前因后果总结" class="headerlink" title="10. 前因后果总结"></a>10. 前因后果总结</h2><h3 id="前因"><a href="#前因" class="headerlink" title="前因"></a>前因</h3><p>后端服务和 MySQL 均运行在 Docker 容器中，且已经接入同一个用户自定义网络。按照正确架构，后端应通过 <code>baota:3306</code> 访问数据库。</p>
+<p>但后端环境变量仍保留了旧配置：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">MYSQL_HOST=172.17.0.1</span><br></pre></td></tr></table></figure>
+
+<p>该地址是 Docker 默认网关，不是 MySQL 容器服务地址。</p>
+<h3 id="经过"><a href="#经过" class="headerlink" title="经过"></a>经过</h3><p>应用请求通过错误的网关路径访问 MySQL，导致连接需要经过宿主机网络和端口转发，最终出现握手等待、连接中断和接口超时。</p>
+<p>排查过程中依次验证了：</p>
+<ol>
+<li>MySQL 监听状态；</li>
+<li>3306端口连通性；</li>
+<li>数据库账号权限；</li>
+<li>Docker 容器网络；</li>
+<li>MySQL 连接速度；</li>
+<li>SQL 查询速度；</li>
+<li>应用运行时数据库配置。</li>
+</ol>
+<p>前六项均未发现足以解释40秒超时的异常，最终在读取 <code>app.config.settings</code> 时发现，应用实际使用的地址仍是 <code>172.17.0.1</code>。</p>
+<h3 id="结果"><a href="#结果" class="headerlink" title="结果"></a>结果</h3><p>将数据库地址修改为 Docker 服务名：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">MYSQL_HOST=baota</span><br></pre></td></tr></table></figure>
+
+<p>并重新创建后端容器，使应用重新加载环境变量。</p>
+<p>修复后，两个后端容器连接 MySQL 的耗时均约为0.045秒，应用接口恢复正常，事故关闭。</p>
+<hr>
+<h2 id="11-整改与预防措施"><a href="#11-整改与预防措施" class="headerlink" title="11. 整改与预防措施"></a>11. 整改与预防措施</h2><table>
+<thead>
+<tr>
+<th>序号</th>
+<th>整改措施</th>
+<th>状态</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1</td>
+<td>所有后端统一使用 <code>baota</code> 服务名连接 MySQL</td>
+<td>已完成</td>
+</tr>
+<tr>
+<td>2</td>
+<td>禁止使用 <code>172.17.0.1</code> 等 Docker 网关地址连接容器数据库</td>
+<td>已完成</td>
+</tr>
+<tr>
+<td>3</td>
+<td>确认后端和数据库容器统一加入 <code>app_net</code></td>
+<td>已完成</td>
+</tr>
+<tr>
+<td>4</td>
+<td>修改环境变量后强制重新创建容器</td>
+<td>已完成</td>
+</tr>
+<tr>
+<td>5</td>
+<td>删除代码中的公网数据库默认地址和默认账号</td>
+<td>待落实</td>
+</tr>
+<tr>
+<td>6</td>
+<td>环境变量缺失时让服务启动失败，禁止静默使用默认值</td>
+<td>待落实</td>
+</tr>
+<tr>
+<td>7</td>
+<td>服务启动时输出脱敏后的数据库连接目标</td>
+<td>待落实</td>
+</tr>
+<tr>
+<td>8</td>
+<td>增加数据库连接和接口耗时监控</td>
+<td>待落实</td>
+</tr>
+<tr>
+<td>9</td>
+<td>增加容器网络及数据库连通性健康检查</td>
+<td>待落实</td>
+</tr>
+<tr>
+<td>10</td>
+<td>建立统一的 Docker 部署配置检查清单</td>
+<td>待落实</td>
+</tr>
+</tbody></table>
+<hr>
+<h2 id="12-建议的配置改进"><a href="#12-建议的配置改进" class="headerlink" title="12. 建议的配置改进"></a>12. 建议的配置改进</h2><h3 id="12-1-禁止使用公网默认值"><a href="#12-1-禁止使用公网默认值" class="headerlink" title="12.1 禁止使用公网默认值"></a>12.1 禁止使用公网默认值</h3><p>不建议：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">mysql_host = os.getenv(<span class="string">&quot;MYSQL_HOST&quot;</span>, <span class="string">&quot;某个公网IP&quot;</span>)</span><br><span class="line">mysql_port = <span class="built_in">int</span>(os.getenv(<span class="string">&quot;MYSQL_PORT&quot;</span>, <span class="string">&quot;13306&quot;</span>))</span><br></pre></td></tr></table></figure>
+
+<p>建议在缺少必要配置时直接终止启动：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">import</span> os</span><br><span class="line"></span><br><span class="line"></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">required_env</span>(<span class="params">name: <span class="built_in">str</span></span>) -&gt; <span class="built_in">str</span>:</span><br><span class="line">    value = os.getenv(name)</span><br><span class="line">    <span class="keyword">if</span> <span class="keyword">not</span> value:</span><br><span class="line">        <span class="keyword">raise</span> RuntimeError(<span class="string">f&quot;Missing required environment variable: <span class="subst">&#123;name&#125;</span>&quot;</span>)</span><br><span class="line">    <span class="keyword">return</span> value</span><br><span class="line"></span><br><span class="line"></span><br><span class="line">mysql_host = required_env(<span class="string">&quot;MYSQL_HOST&quot;</span>)</span><br><span class="line">mysql_port = <span class="built_in">int</span>(required_env(<span class="string">&quot;MYSQL_PORT&quot;</span>))</span><br><span class="line">mysql_database = required_env(<span class="string">&quot;MYSQL_DATABASE&quot;</span>)</span><br><span class="line">mysql_user = required_env(<span class="string">&quot;MYSQL_USER&quot;</span>)</span><br><span class="line">mysql_password = required_env(<span class="string">&quot;MYSQL_PASSWORD&quot;</span>)</span><br></pre></td></tr></table></figure>
+
+<h3 id="12-2-启动时输出脱敏配置"><a href="#12-2-启动时输出脱敏配置" class="headerlink" title="12.2 启动时输出脱敏配置"></a>12.2 启动时输出脱敏配置</h3><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="built_in">print</span>(</span><br><span class="line">    <span class="string">&quot;MySQL target:&quot;</span>,</span><br><span class="line">    settings.mysql_host,</span><br><span class="line">    settings.mysql_port,</span><br><span class="line">    settings.mysql_database,</span><br><span class="line">    settings.mysql_user,</span><br><span class="line">)</span><br></pre></td></tr></table></figure>
+
+<p>严禁输出：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">MYSQL_PASSWORD</span><br><span class="line">Token</span><br><span class="line">Secret Key</span><br></pre></td></tr></table></figure>
+
+<h3 id="12-3-增加-Docker-健康检查"><a href="#12-3-增加-Docker-健康检查" class="headerlink" title="12.3 增加 Docker 健康检查"></a>12.3 增加 Docker 健康检查</h3><figure class="highlight yaml"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br></pre></td><td class="code"><pre><span class="line"><span class="attr">services:</span></span><br><span class="line">  <span class="attr">baota:</span></span><br><span class="line">    <span class="attr">healthcheck:</span></span><br><span class="line">      <span class="attr">test:</span></span><br><span class="line">        [</span><br><span class="line">          <span class="string">&quot;CMD-SHELL&quot;</span>,</span><br><span class="line">          <span class="string">&quot;mysqladmin ping -h 127.0.0.1 -P 3306 --silent&quot;</span></span><br><span class="line">        ]</span><br><span class="line">      <span class="attr">interval:</span> <span class="string">10s</span></span><br><span class="line">      <span class="attr">timeout:</span> <span class="string">5s</span></span><br><span class="line">      <span class="attr">retries:</span> <span class="number">6</span></span><br><span class="line"></span><br><span class="line">  <span class="attr">sca-backend:</span></span><br><span class="line">    <span class="attr">depends_on:</span></span><br><span class="line">      <span class="attr">baota:</span></span><br><span class="line">        <span class="attr">condition:</span> <span class="string">service_healthy</span></span><br></pre></td></tr></table></figure>
+
+<p>实际配置应根据当前 Docker Compose 版本和数据库容器环境进行调整。</p>
+<hr>
+<h2 id="13-标准排查方法"><a href="#13-标准排查方法" class="headerlink" title="13. 标准排查方法"></a>13. 标准排查方法</h2><p>今后遇到“数据库直接查询快，但接口超时”的问题，应按以下顺序排查：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line">1. 查看应用运行时实际配置</span><br><span class="line">            ↓</span><br><span class="line">2. 使用相同配置测试数据库连接</span><br><span class="line">            ↓</span><br><span class="line">3. 检查 Docker 网络和服务名解析</span><br><span class="line">            ↓</span><br><span class="line">4. 检查 MySQL 监听及账号权限</span><br><span class="line">            ↓</span><br><span class="line">5. 测试真实 SQL 的 execute 和 fetch 耗时</span><br><span class="line">            ↓</span><br><span class="line">6. 检查连接池、业务逻辑和序列化耗时</span><br><span class="line">            ↓</span><br><span class="line">7. 验证修改后进程是否真正重载配置</span><br></pre></td></tr></table></figure>
+
+<p>关键原则：</p>
+<blockquote>
+<p>测试命令必须使用与应用进程完全相同的主机、端口、账号、数据库和网络环境。否则测试成功不能代表应用链路正常。</p>
+</blockquote>
+<hr>
+<h2 id="14-最终结论"><a href="#14-最终结论" class="headerlink" title="14. 最终结论"></a>14. 最终结论</h2><p>本次事故不是 MySQL 性能问题，也不是 SQL 查询效率问题。</p>
+<p>根本原因是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">应用数据库连接地址配置错误</span><br></pre></td></tr></table></figure>
+
+<p>应用使用了 Docker 默认网关：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">172.17.0.1:3306</span><br></pre></td></tr></table></figure>
+
+<p>而不是通过 Docker 用户自定义网络直接访问：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">baota:3306</span><br></pre></td></tr></table></figure>
+
+<p>修复数据库环境变量并重新创建后端容器后，MySQL 连接耗时恢复至约0.045秒，应用接口恢复正常。</p>
+<p><strong>事故已解决并关闭。</strong></p>
+
+    </div>
+
+    
+    
+    
+<div>
+    
+        <div style="text-align:center;color: #ccc;font-size:14px;">-------------　　　　本文结束　<i class="fa fa-flag"></i>　感谢阅读　　　　-------------</div>
+    
+</div>
+        
+
+<div>
+<ul class="post-copyright">
+  <li class="post-copyright-author">
+    <strong>本文作者： </strong>王宁
+  </li>
+  <li class="post-copyright-link">
+    <strong>本文链接：</strong>
+    <a href="https://blog.babynan.top/2026/07/311502/" title="Docker容器访问宝塔MySQL超时问题排查与解决实战">https://blog.babynan.top/2026/07/311502/</a>
+  </li>
+  <li class="post-copyright-license">
+    <strong>版权声明： </strong>本博客所有文章除特别声明外，均采用 <span class="exturl" data-url="aHR0cHM6Ly9jcmVhdGl2ZWNvbW1vbnMub3JnL2xpY2Vuc2VzL2J5LW5jLXNhLzQuMC9kZWVkLnpoLWhhbnM="><i class="fab fa-fw fa-creative-commons"></i>BY-NC-SA</span> 许可协议。转载请注明出处！
+  </li>
+</ul>
+</div>
+
+        
+
+  <div class="followme">
+    <p>欢迎关注我的其它发布渠道</p>
+
+    <div class="social-list">
+
+        <div class="social-item">
+          <a target="_blank" class="social-link" href="/atom.xml">
+            <span class="icon">
+              <i class="fa fa-rss"></i>
+            </span>
+
+            <span class="label">RSS</span>
+          </a>
+        </div>
+
+        <div class="social-item">
+          <a target="_blank" class="social-link" href="mailto:wxs_code@126.com">
+            <span class="icon">
+              <i class="fas fa-envelope"></i>
+            </span>
+
+            <span class="label">Email</span>
+          </a>
+        </div>
+    </div>
+  </div>
+
+
+      <footer class="post-footer">
+          
+          <div class="post-tags">
+              <a href="/tags/Docker/" rel="tag"><i class="fa fa-tag"></i> Docker</a>
+              <a href="/tags/MySQL/" rel="tag"><i class="fa fa-tag"></i> MySQL</a>
+              <a href="/tags/%E5%AE%9D%E5%A1%94/" rel="tag"><i class="fa fa-tag"></i> 宝塔</a>
+              <a href="/tags/%E5%AE%B9%E5%99%A8%E7%BD%91%E7%BB%9C/" rel="tag"><i class="fa fa-tag"></i> 容器网络</a>
+              <a href="/tags/%E7%BD%91%E7%BB%9C%E6%8E%92%E6%9F%A5/" rel="tag"><i class="fa fa-tag"></i> 网络排查</a>
+              <a href="/tags/%E6%95%85%E9%9A%9C%E5%A4%84%E7%90%86/" rel="tag"><i class="fa fa-tag"></i> 故障处理</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2026/06/231412/" rel="prev" title="缠论入门">
+      <i class="fa fa-chevron-left"></i> 缠论入门
+    </a></div>
+      <div class="post-nav-item"></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+
+
+          </div>
+          
+    
+  <div class="comments">
+    <div id="disqus_thread">
+      <noscript>Please enable JavaScript to view the comments powered by Disqus.</noscript>
+    </div>
+  </div>
+  
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let { activeClass } = CONFIG.comments;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#Docker-%E5%AE%B9%E5%99%A8%E8%AE%BF%E9%97%AE%E5%AE%9D%E5%A1%94-MySQL-%E6%8E%A5%E5%8F%A3%E8%B6%85%E6%97%B6%E4%BA%8B%E6%95%85%E8%A7%A3%E5%86%B3%E6%8A%A5%E5%91%8A"><span class="nav-number">1.</span> <span class="nav-text">Docker 容器访问宝塔 MySQL 接口超时事故解决报告</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#1-%E4%BA%8B%E6%95%85%E5%9F%BA%E6%9C%AC%E4%BF%A1%E6%81%AF"><span class="nav-number">1.1.</span> <span class="nav-text">1. 事故基本信息</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#2-%E4%BA%8B%E6%95%85%E6%A6%82%E8%BF%B0"><span class="nav-number">1.2.</span> <span class="nav-text">2. 事故概述</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#3-%E7%B3%BB%E7%BB%9F%E9%83%A8%E7%BD%B2%E8%83%8C%E6%99%AF"><span class="nav-number">1.3.</span> <span class="nav-text">3. 系统部署背景</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#4-%E4%BA%8B%E6%95%85%E7%8E%B0%E8%B1%A1"><span class="nav-number">1.4.</span> <span class="nav-text">4. 事故现象</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#4-1-%E5%BA%94%E7%94%A8%E6%8E%A5%E5%8F%A3%E5%BC%82%E5%B8%B8"><span class="nav-number">1.4.1.</span> <span class="nav-text">4.1 应用接口异常</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#4-2-%E6%95%B0%E6%8D%AE%E5%BA%93%E7%9B%B4%E6%8E%A5%E6%9F%A5%E8%AF%A2%E6%AD%A3%E5%B8%B8"><span class="nav-number">1.4.2.</span> <span class="nav-text">4.2 数据库直接查询正常</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#5-%E6%8E%92%E6%9F%A5%E8%BF%87%E7%A8%8B"><span class="nav-number">1.5.</span> <span class="nav-text">5. 排查过程</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#5-1-%E6%A3%80%E6%9F%A5-MySQL-%E7%9B%91%E5%90%AC%E7%8A%B6%E6%80%81"><span class="nav-number">1.5.1.</span> <span class="nav-text">5.1 检查 MySQL 监听状态</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#5-2-%E6%A3%80%E6%9F%A5%E6%95%B0%E6%8D%AE%E5%BA%93%E8%B4%A6%E5%8F%B7%E5%92%8C%E8%BF%9C%E7%A8%8B%E6%9D%83%E9%99%90"><span class="nav-number">1.5.2.</span> <span class="nav-text">5.2 检查数据库账号和远程权限</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#5-3-%E4%BD%BF%E7%94%A8%E5%AE%B9%E5%99%A8%E6%9C%8D%E5%8A%A1%E5%90%8D%E8%BF%9B%E8%A1%8C%E6%89%8B%E5%B7%A5%E8%BF%9E%E6%8E%A5%E6%B5%8B%E8%AF%95"><span class="nav-number">1.5.3.</span> <span class="nav-text">5.3 使用容器服务名进行手工连接测试</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#5-4-%E5%8F%91%E7%8E%B0%E6%89%8B%E5%B7%A5%E6%B5%8B%E8%AF%95%E4%B8%8E%E5%BA%94%E7%94%A8%E6%8E%A5%E5%8F%A3%E4%BD%BF%E7%94%A8%E7%9A%84%E9%85%8D%E7%BD%AE%E4%B8%8D%E4%B8%80%E8%87%B4"><span class="nav-number">1.5.4.</span> <span class="nav-text">5.4 发现手工测试与应用接口使用的配置不一致</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#6-%E6%A0%B9%E6%9C%AC%E5%8E%9F%E5%9B%A0%E5%88%86%E6%9E%90"><span class="nav-number">1.6.</span> <span class="nav-text">6. 根本原因分析</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#6-1-%E7%9B%B4%E6%8E%A5%E5%8E%9F%E5%9B%A0"><span class="nav-number">1.6.1.</span> <span class="nav-text">6.1 直接原因</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#6-2-%E9%94%99%E8%AF%AF%E8%AE%BF%E9%97%AE%E8%B7%AF%E5%BE%84"><span class="nav-number">1.6.2.</span> <span class="nav-text">6.2 错误访问路径</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#6-3-%E6%AD%A3%E7%A1%AE%E8%AE%BF%E9%97%AE%E8%B7%AF%E5%BE%84"><span class="nav-number">1.6.3.</span> <span class="nav-text">6.3 正确访问路径</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#6-4-%E9%85%8D%E7%BD%AE%E5%8A%A0%E8%BD%BD%E6%9C%BA%E5%88%B6%E6%94%BE%E5%A4%A7%E4%BA%86%E9%97%AE%E9%A2%98"><span class="nav-number">1.6.4.</span> <span class="nav-text">6.4 配置加载机制放大了问题</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#7-%E4%BF%83%E6%88%90%E5%9B%A0%E7%B4%A0"><span class="nav-number">1.7.</span> <span class="nav-text">7. 促成因素</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#8-%E8%A7%A3%E5%86%B3%E6%8E%AA%E6%96%BD"><span class="nav-number">1.8.</span> <span class="nav-text">8. 解决措施</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#8-1-%E4%BF%AE%E6%94%B9%E6%95%B0%E6%8D%AE%E5%BA%93%E8%BF%9E%E6%8E%A5%E5%9C%B0%E5%9D%80"><span class="nav-number">1.8.1.</span> <span class="nav-text">8.1 修改数据库连接地址</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#8-2-%E7%A1%AE%E8%AE%A4%E5%AE%B9%E5%99%A8%E5%A4%84%E4%BA%8E%E5%90%8C%E4%B8%80%E7%BD%91%E7%BB%9C"><span class="nav-number">1.8.2.</span> <span class="nav-text">8.2 确认容器处于同一网络</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#8-3-%E9%87%8D%E6%96%B0%E5%88%9B%E5%BB%BA%E5%90%8E%E7%AB%AF%E5%AE%B9%E5%99%A8"><span class="nav-number">1.8.3.</span> <span class="nav-text">8.3 重新创建后端容器</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#8-4-%E9%AA%8C%E8%AF%81%E5%BA%94%E7%94%A8%E5%AE%9E%E9%99%85%E9%85%8D%E7%BD%AE"><span class="nav-number">1.8.4.</span> <span class="nav-text">8.4 验证应用实际配置</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#9-%E4%BF%AE%E5%A4%8D%E5%90%8E%E9%AA%8C%E8%AF%81%E7%BB%93%E6%9E%9C"><span class="nav-number">1.9.</span> <span class="nav-text">9. 修复后验证结果</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#9-1-sca-backend-%E6%95%B0%E6%8D%AE%E5%BA%93%E8%BF%9E%E6%8E%A5"><span class="nav-number">1.9.1.</span> <span class="nav-text">9.1 sca-backend 数据库连接</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#9-2-fds-backend-%E6%95%B0%E6%8D%AE%E5%BA%93%E8%BF%9E%E6%8E%A5"><span class="nav-number">1.9.2.</span> <span class="nav-text">9.2 fds-backend 数据库连接</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#9-3-SQL-%E6%9F%A5%E8%AF%A2%E9%AA%8C%E8%AF%81"><span class="nav-number">1.9.3.</span> <span class="nav-text">9.3 SQL 查询验证</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#9-4-%E5%BA%94%E7%94%A8%E9%AA%8C%E8%AF%81"><span class="nav-number">1.9.4.</span> <span class="nav-text">9.4 应用验证</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#10-%E5%89%8D%E5%9B%A0%E5%90%8E%E6%9E%9C%E6%80%BB%E7%BB%93"><span class="nav-number">1.10.</span> <span class="nav-text">10. 前因后果总结</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#%E5%89%8D%E5%9B%A0"><span class="nav-number">1.10.1.</span> <span class="nav-text">前因</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E7%BB%8F%E8%BF%87"><span class="nav-number">1.10.2.</span> <span class="nav-text">经过</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E7%BB%93%E6%9E%9C"><span class="nav-number">1.10.3.</span> <span class="nav-text">结果</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#11-%E6%95%B4%E6%94%B9%E4%B8%8E%E9%A2%84%E9%98%B2%E6%8E%AA%E6%96%BD"><span class="nav-number">1.11.</span> <span class="nav-text">11. 整改与预防措施</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#12-%E5%BB%BA%E8%AE%AE%E7%9A%84%E9%85%8D%E7%BD%AE%E6%94%B9%E8%BF%9B"><span class="nav-number">1.12.</span> <span class="nav-text">12. 建议的配置改进</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#12-1-%E7%A6%81%E6%AD%A2%E4%BD%BF%E7%94%A8%E5%85%AC%E7%BD%91%E9%BB%98%E8%AE%A4%E5%80%BC"><span class="nav-number">1.12.1.</span> <span class="nav-text">12.1 禁止使用公网默认值</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#12-2-%E5%90%AF%E5%8A%A8%E6%97%B6%E8%BE%93%E5%87%BA%E8%84%B1%E6%95%8F%E9%85%8D%E7%BD%AE"><span class="nav-number">1.12.2.</span> <span class="nav-text">12.2 启动时输出脱敏配置</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#12-3-%E5%A2%9E%E5%8A%A0-Docker-%E5%81%A5%E5%BA%B7%E6%A3%80%E6%9F%A5"><span class="nav-number">1.12.3.</span> <span class="nav-text">12.3 增加 Docker 健康检查</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#13-%E6%A0%87%E5%87%86%E6%8E%92%E6%9F%A5%E6%96%B9%E6%B3%95"><span class="nav-number">1.13.</span> <span class="nav-text">13. 标准排查方法</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#14-%E6%9C%80%E7%BB%88%E7%BB%93%E8%AE%BA"><span class="nav-number">1.14.</span> <span class="nav-text">14. 最终结论</span></a></li></ol></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+    <img class="site-author-image" itemprop="image" alt="王宁"
+      src="https://imgbed.babynan.top/file/1750831381779_53158089.gif">
+  <p class="site-author-name" itemprop="name">王宁</p>
+  <div class="site-description" itemprop="description">知行合一</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">10</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">11</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">21</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+  <div class="links-of-author motion-element">
+      <span class="links-of-author-item">
+        <span class="exturl" data-url="aHR0cHM6Ly9naXRodWIuY29tL3hzd2FuZ2NvZGU=" title="GitHub → https:&#x2F;&#x2F;github.com&#x2F;xswangcode"><i class="fab fa-github fa-fw"></i>GitHub</span>
+      </span>
+      <span class="links-of-author-item">
+        <span class="exturl" data-url="bWFpbHRvOnd4c19jb2RlQDEyNi5jb20=" title="E-Mail → mailto:wxs_code@126.com"><i class="fa fa-envelope fa-fw"></i>E-Mail</span>
+      </span>
+      <span class="links-of-author-item">
+        <span class="exturl" data-url="aHR0cHM6Ly9pbWdiZWQuYmFieW5hbi50b3AvZmlsZS8xNzUwODMzMzMwMTg0X2ltYWdlLnBuZw==" title="WeChat → https:&#x2F;&#x2F;imgbed.babynan.top&#x2F;file&#x2F;1750833330184_image.png"><i class="fab fa-weixin fa-fw"></i>WeChat</span>
+      </span>
+      <span class="links-of-author-item">
+        <a href="/atom.xml" title="RSS → &#x2F;atom.xml"><i class="fa fa-rss fa-fw"></i>RSS</a>
+      </span>
+  </div>
+
+
+  <div class="links-of-blogroll motion-element">
+    <div class="links-of-blogroll-title"><i class="fa fa-link fa-fw"></i>
+      友链
+    </div>
+    <ul class="links-of-blogroll-list">
+        <li class="links-of-blogroll-item">
+          <span class="exturl" data-url="aHR0cHM6Ly9ob21lLmJhYnluYW4udG9wLw==" title="https:&#x2F;&#x2F;home.babynan.top&#x2F;">导航页</span>
+        </li>
+        <li class="links-of-blogroll-item">
+          <span class="exturl" data-url="aHR0cHM6Ly9naXRodWIuY29tL3RoZW1lLW5leHQvaGV4by10aGVtZS1uZXh0" title="https:&#x2F;&#x2F;github.com&#x2F;theme-next&#x2F;hexo-theme-next">博客主题</span>
+        </li>
+        <li class="links-of-blogroll-item">
+          <span class="exturl" data-url="aHR0cHM6Ly94c3dhbmdjb2RlLmdpdGh1Yi5pby8=" title="https:&#x2F;&#x2F;xswangcode.github.io&#x2F;">github源</span>
+        </li>
+        <li class="links-of-blogroll-item">
+          <span class="exturl" data-url="aHR0cHM6Ly94c3dhbmcucGFnZXMuZGV2Lw==" title="https:&#x2F;&#x2F;xswang.pages.dev&#x2F;">cloudflare源</span>
+        </li>
+    </ul>
+  </div>
+
+      </div>
+        <div class="back-to-top motion-element">
+          <i class="fa fa-arrow-up"></i>
+          <span>0%</span>
+        </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+        
+
+<div class="copyright">
+  
+  &copy; 2024 – 
+  <span itemprop="copyrightYear">2026</span>
+  <span class="with-love">
+    <i class="fa fa-heart"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">王宁</span>
+    <span class="post-meta-divider">|</span>
+    <span class="post-meta-item-icon">
+      <i class="fa fa-chart-area"></i>
+    </span>
+      <span class="post-meta-item-text">站点总字数：</span>
+    <span title="站点总字数">400k</span>
+    <span class="post-meta-divider">|</span>
+    <span class="post-meta-item-icon">
+      <i class="fa fa-coffee"></i>
+    </span>
+      <span class="post-meta-item-text">站点阅读时长 &asymp;</span>
+    <span title="站点阅读时长">24:13</span>
+</div>
+  <div class="powered-by">由 <span class="exturl theme-link" data-url="aHR0cHM6Ly9oZXhvLmlv">Hexo</span> & <span class="exturl theme-link" data-url="aHR0cHM6Ly90aGVtZS1uZXh0Lm9yZw==">NexT.Gemini</span> 强力驱动
+  </div>
+
+
+        
+<div class="busuanzi-count">
+  <script data-pjax async src="/lib/busuanzi/busuanzi.pure.mini.js"></script>
+    <span class="post-meta-item" id="busuanzi_container_site_uv" style="display: none;">
+      <span class="post-meta-item-icon">
+        <i class="fa fa-user"></i>
+      </span>
+      <span class="site-uv" title="总访客量">
+        <span id="busuanzi_value_site_uv"></span>
+      </span>
+    </span>
+    <span class="post-meta-divider">|</span>
+    <span class="post-meta-item" id="busuanzi_container_site_pv" style="display: none;">
+      <span class="post-meta-item-icon">
+        <i class="fa fa-eye"></i>
+      </span>
+      <span class="site-pv" title="总访问量">
+        <span id="busuanzi_value_site_pv"></span>
+      </span>
+    </span>
+</div>
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script size="400" alpha="0.6" zIndex="-1" src="/lib/canvas-ribbon/canvas-ribbon.js"></script>
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/pjax/pjax.min.js"></script>
+  <script src="/lib/jquery/jquery.min.js"></script>
+  <script src="/lib/fancybox/jquery.fancybox.min.js"></script>
+  <script src="/lib/lozad/lozad.min.js"></script>
+  <script src="/lib/pangu/pangu.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+
+<script src="/js/utils.js"></script>
+
+<script src="/js/motion.js"></script>
+
+
+<script src="/js/schemes/pisces.js"></script>
+
+
+<script src="/js/next-boot.js"></script>
+
+  <script>
+var pjax = new Pjax({
+  selectors: [
+    'head title',
+    '#page-configurations',
+    '.content-wrap',
+    '.post-toc-wrap',
+    '.languages',
+    '#pjax'
+  ],
+  switches: {
+    '.post-toc-wrap': Pjax.switches.innerHTML
+  },
+  analytics: false,
+  cacheBust: false,
+  scrollTo : !CONFIG.bookmark.enable
+});
+
+window.addEventListener('pjax:success', () => {
+  document.querySelectorAll('script[data-pjax], script#page-configurations, #pjax script').forEach(element => {
+    var code = element.text || element.textContent || element.innerHTML || '';
+    var parent = element.parentNode;
+    parent.removeChild(element);
+    var script = document.createElement('script');
+    if (element.id) {
+      script.id = element.id;
+    }
+    if (element.className) {
+      script.className = element.className;
+    }
+    if (element.type) {
+      script.type = element.type;
+    }
+    if (element.src) {
+      script.src = element.src;
+      // Force synchronous loading of peripheral JS.
+      script.async = false;
+    }
+    if (element.dataset.pjax !== undefined) {
+      script.dataset.pjax = '';
+    }
+    if (code !== '') {
+      script.appendChild(document.createTextNode(code));
+    }
+    parent.appendChild(script);
+  });
+  NexT.boot.refresh();
+  // Define Motion Sequence & Bootstrap Motion.
+  if (CONFIG.motion.enable) {
+    NexT.motion.integrator
+      .init()
+      .add(NexT.motion.middleWares.subMenu)
+      .add(NexT.motion.middleWares.postList)
+      .bootstrap();
+  }
+  NexT.utils.updateSidebarPosition();
+});
+</script>
+
+
+
+
+  
+  <script data-pjax>
+    (function(){
+      var canonicalURL, curProtocol;
+      //Get the <link> tag
+      var x=document.getElementsByTagName("link");
+		//Find the last canonical URL
+		if(x.length > 0){
+			for (i=0;i<x.length;i++){
+				if(x[i].rel.toLowerCase() == 'canonical' && x[i].href){
+					canonicalURL=x[i].href;
+				}
+			}
+		}
+    //Get protocol
+	    if (!canonicalURL){
+	    	curProtocol = window.location.protocol.split(':')[0];
+	    }
+	    else{
+	    	curProtocol = canonicalURL.split(':')[0];
+	    }
+      //Get current URL if the canonical URL does not exist
+	    if (!canonicalURL) canonicalURL = window.location.href;
+	    //Assign script content. Replace current URL with the canonical URL
+      !function(){var e=/([http|https]:\/\/[a-zA-Z0-9\_\.]+\.baidu\.com)/gi,r=canonicalURL,t=document.referrer;if(!e.test(r)){var n=(String(curProtocol).toLowerCase() === 'https')?"https://sp0.baidu.com/9_Q4simg2RQJ8t7jm9iCKT-xh_/s.gif":"//api.share.baidu.com/s.gif";t?(n+="?r="+encodeURIComponent(document.referrer),r&&(n+="&l="+r)):r&&(n+="?l="+r);var i=new Image;i.src=n}}(window);})();
+  </script>
+
+
+
+
+  
+<script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+
+    <div id="pjax">
+  
+
+  
+
+  
+  <script src="/lib/quicklink/quicklink.umd.min.js"></script>
+  <script>
+      window.addEventListener('load', () => {
+      quicklink({
+        timeout : 3000,
+        priority: true,
+        ignores : [uri => uri.includes('#'),uri => uri === 'https://blog.babynan.top/2026/07/311502/',]
+      });
+      });
+  </script>
+<script src="/lib/darkmode/darkmode-js.min.js"></script>
+
+<script>
+var options = {
+  bottom: '64px',
+  right: '48px',
+  left: 'unset',
+  time: '0.5s',
+  mixColor: 'transparent',
+  backgroundColor: 'transparent',
+  buttonColorDark: '#100f2c',
+  buttonColorLight: '#fff',
+  saveInCookies: true,
+  label: '🌓',
+  autoMatchOsTheme: true
+}
+const darkmode = new Darkmode(options);
+window.darkmode = darkmode;
+darkmode.showWidget();
+</script>
+
+<script>
+  function loadCount() {
+    var d = document, s = d.createElement('script');
+    s.src = 'https://xscodeBlog.disqus.com/count.js';
+    s.id = 'dsq-count-scr';
+    (d.head || d.body).appendChild(s);
+  }
+  // defer loading until the whole page loading is completed
+  window.addEventListener('load', loadCount, false);
+</script>
+<script>
+  var disqus_config = function() {
+    this.page.url = "https://blog.babynan.top/2026/07/311502/";
+    this.page.identifier = "2026/07/311502/";
+    this.page.title = "Docker容器访问宝塔MySQL超时问题排查与解决实战";
+    };
+  NexT.utils.loadComments(document.querySelector('#disqus_thread'), () => {
+    if (window.DISQUS) {
+      DISQUS.reset({
+        reload: true,
+        config: disqus_config
+      });
+    } else {
+      var d = document, s = d.createElement('script');
+      s.src = 'https://xscodeBlog.disqus.com/embed.js';
+      s.setAttribute('data-timestamp', '' + +new Date());
+      (d.head || d.body).appendChild(s);
+    }
+  });
+</script>
+
+    </div>
+  <!-- 页面点击小红心 -->
+  <script type="text/javascript" src="/js/src/clicklove.js"></script> 
+</body>
+</html>
