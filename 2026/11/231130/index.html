@@ -1,0 +1,896 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 7.3.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/all.min.css">
+  <link rel="stylesheet" href="/lib/fancybox/jquery.fancybox.min.css">
+
+<script id="hexo-configurations">
+    var NexT = window.NexT || {};
+    var CONFIG = {"hostname":"blog.babynan.top","root":"/","scheme":"Gemini","version":"7.8.0","exturl":true,"sidebar":{"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},"copycode":{"enable":true,"show_result":true,"style":"mac"},"back2top":{"enable":true,"sidebar":true,"scrollpercent":true},"bookmark":{"enable":false,"color":"#222","save":"auto"},"fancybox":true,"mediumzoom":false,"lazyload":true,"pangu":true,"comments":{"style":"tabs","active":"valine","storage":true,"lazyload":false,"nav":null},"algolia":{"hits":{"per_page":10},"labels":{"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}},"localsearch":{"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":true},"motion":{"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}},"path":"search.xml"};
+  </script>
+
+  <meta name="description" content="内网机器、宝塔面板、没有外网，业务里还挂着 lua。折腾了一晚上把 Nginx 编到 1.30.7，记一下 lua-resty-core 版本配对、sticky 模块编不过、srclib 相对路径这三个坑。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="宝塔上的 Nginx 升到 1.30.7，修复高危漏洞">
+<meta property="og:url" content="https://blog.babynan.top/2026/11/231130/index.html">
+<meta property="og:site_name" content="Coding王">
+<meta property="og:description" content="内网机器、宝塔面板、没有外网，业务里还挂着 lua。折腾了一晚上把 Nginx 编到 1.30.7，记一下 lua-resty-core 版本配对、sticky 模块编不过、srclib 相对路径这三个坑。">
+<meta property="og:locale" content="zh_CN">
+<meta property="article:published_time" content="2026-11-23T03:30:00.000Z">
+<meta property="article:modified_time" content="2026-11-23T03:50:00.000Z">
+<meta property="article:author" content="王宁">
+<meta property="article:tag" content="nginx">
+<meta property="article:tag" content="lua">
+<meta property="article:tag" content="luajit">
+<meta property="article:tag" content="宝塔面板">
+<meta property="article:tag" content="踩坑记录">
+<meta name="twitter:card" content="summary">
+
+<link rel="canonical" href="https://blog.babynan.top/2026/11/231130/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome : false,
+    isPost : true,
+    lang   : 'zh-CN'
+  };
+</script>
+
+  <title>宝塔上的 Nginx 升到 1.30.7，修复高危漏洞 | Coding王</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+<link rel="alternate" href="/atom.xml" title="Coding王" type="application/atom+xml">
+<link rel="alternate" href="/rss2.xml" title="Coding王" type="application/rss+xml">
+<style>.darkmode--activated{--body-bg-color:#282828;--content-bg-color:#333;--card-bg-color:#555;--text-color:#ccc;--blockquote-color:#bbb;--link-color:#ccc;--link-hover-color:#eee;--brand-color:#ddd;--brand-hover-color:#ddd;--table-row-odd-bg-color:#282828;--table-row-hover-bg-color:#363636;--menu-item-bg-color:#555;--btn-default-bg:#222;--btn-default-color:#ccc;--btn-default-border-color:#555;--btn-default-hover-bg:#666;--btn-default-hover-color:#ccc;--btn-default-hover-border-color:#666;--highlight-background:#282b2e;--highlight-foreground:#a9b7c6;--highlight-gutter-background:#34393d;--highlight-gutter-foreground:#9ca9b6}.darkmode--activated img{opacity:.75}.darkmode--activated img:hover{opacity:.9}.darkmode--activated code{color:#69dbdc;background:0 0}button.darkmode-toggle{z-index:9999}.darkmode-ignore,img{display:flex!important}.beian img{display:inline-block!important}</style></head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+
+  <div class="site-meta">
+
+    <a href="/" class="brand" rel="start">
+      <span class="logo-line-before"><i></i></span>
+      <h1 class="site-title">Coding王</h1>
+      <span class="logo-line-after"><i></i></span>
+    </a>
+      <p class="site-subtitle" itemprop="description">日常+随笔</p>
+  </div>
+
+  <div class="site-nav-right">
+    <div class="toggle popup-trigger">
+        <i class="fa fa-search fa-fw fa-lg"></i>
+    </div>
+  </div>
+</div>
+
+
+
+
+<nav class="site-nav">
+  <ul id="menu" class="main-menu menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-home fa-fw"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-user fa-fw"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-tags fa-fw"></i>标签<span class="badge">23</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-th fa-fw"></i>分类<span class="badge">8</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-archive fa-fw"></i>归档<span class="badge">7</span></a>
+
+  </li>
+        <li class="menu-item menu-item-sitemap">
+
+    <a href="/sitemap.xml" rel="section"><i class="fa fa-sitemap fa-fw"></i>站点地图</a>
+
+  </li>
+        <li class="menu-item menu-item-commonweal">
+
+    <a href="/404" rel="section"><i class="fa fa-heartbeat fa-fw"></i>公益 404</a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+</nav>
+
+
+
+  <div class="search-pop-overlay">
+    <div class="popup search-popup">
+        <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocapitalize="off"
+           placeholder="搜索..." spellcheck="false"
+           type="search" class="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result">
+  <div id="no-result">
+    <i class="fa fa-spinner fa-pulse fa-5x fa-fw"></i>
+  </div>
+</div>
+
+    </div>
+  </div>
+
+</div>
+    </header>
+
+    
+  <div class="reading-progress-bar"></div>
+
+  <span class="exturl github-corner" data-url="aHR0cHM6Ly9naXRodWIuY29tL3hzd2FuZ2NvZGU=" title="关注我的GitHub" aria-label="关注我的GitHub"><svg width="80" height="80" viewBox="0 0 250 250" aria-hidden="true"><path d="M0,0 L115,115 L130,115 L142,142 L250,250 L250,0 Z"></path><path d="M128.3,109.0 C113.8,99.7 119.0,89.6 119.0,89.6 C122.0,82.7 120.5,78.6 120.5,78.6 C119.2,72.0 123.4,76.3 123.4,76.3 C127.3,80.9 125.5,87.3 125.5,87.3 C122.9,97.6 130.6,101.9 134.4,103.2" fill="currentColor" style="transform-origin: 130px 106px;" class="octo-arm"></path><path d="M115.0,115.0 C114.9,115.1 118.7,116.5 119.8,115.4 L133.7,101.6 C136.9,99.2 139.9,98.4 142.2,98.6 C133.8,88.0 127.5,74.4 143.8,58.0 C148.5,53.4 154.0,51.2 159.7,51.0 C160.3,49.4 163.2,43.6 171.4,40.1 C171.4,40.1 176.1,42.5 178.8,56.2 C183.1,58.6 187.2,61.8 190.9,65.4 C194.5,69.0 197.7,73.2 200.1,77.6 C213.8,80.2 216.3,84.9 216.3,84.9 C212.7,93.1 206.9,96.0 205.4,96.6 C205.1,102.4 203.0,107.8 198.3,112.5 C181.9,128.9 168.3,122.5 157.7,114.1 C157.9,116.9 156.7,120.9 152.7,124.9 L141.0,136.5 C139.8,137.7 141.6,141.9 141.8,141.8 Z" fill="currentColor" class="octo-body"></path></svg></span>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content post posts-expand">
+            
+
+    
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block" lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="https://blog.babynan.top/2026/11/231130/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="https://imgbed.babynan.top/file/default/J3n4pZXy.png">
+      <meta itemprop="name" content="王宁">
+      <meta itemprop="description" content="知行合一">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="Coding王">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          宝塔上的 Nginx 升到 1.30.7，修复高危漏洞
+        </h1>
+
+        <div class="post-meta">
+          
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="far fa-calendar"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+              
+
+              <time title="创建时间：2026-11-23 11:30:00 / 修改时间：11:50:00" itemprop="dateCreated datePublished" datetime="2026-11-23T11:30:00+08:00">2026-11-23</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="far fa-folder"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E8%BF%90%E7%BB%B4/" itemprop="url" rel="index"><span itemprop="name">运维</span></a>
+                </span>
+            </span>
+
+          
+            <span class="post-meta-item" title="阅读次数" id="busuanzi_container_page_pv" style="display: none;">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-eye"></i>
+              </span>
+              <span class="post-meta-item-text">阅读次数：</span>
+              <span id="busuanzi_value_page_pv"></span>
+            </span>
+  
+  <span class="post-meta-item">
+    
+      <span class="post-meta-item-icon">
+        <i class="far fa-comment"></i>
+      </span>
+      <span class="post-meta-item-text">Disqus：</span>
+    
+    <a title="disqus" href="/2026/11/231130/#disqus_thread" itemprop="discussionUrl">
+      <span class="post-comments-count disqus-comment-count" data-disqus-identifier="2026/11/231130/" itemprop="commentCount"></span>
+    </a>
+  </span>
+  
+  <br>
+            <span class="post-meta-item" title="本文字数">
+              <span class="post-meta-item-icon">
+                <i class="far fa-file-word"></i>
+              </span>
+                <span class="post-meta-item-text">本文字数：</span>
+              <span>2.1k</span>
+            </span>
+            <span class="post-meta-item" title="阅读时长">
+              <span class="post-meta-item-icon">
+                <i class="far fa-clock"></i>
+              </span>
+                <span class="post-meta-item-text">阅读时长 &asymp;</span>
+              <span>8 分钟</span>
+            </span>
+            <div class="post-description">内网机器、宝塔面板、没有外网，业务里还挂着 lua。折腾了一晚上把 Nginx 编到 1.30.7，记一下 lua-resty-core 版本配对、sticky 模块编不过、srclib 相对路径这三个坑。</div>
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>这台生产环境服务器在内网，出不去。宝塔自带的 Nginx 用了两三年，业务里挂着 lua 重写和缓存清理，面板上那个”升级”按钮点了也白点——它得联网下包，而且一升级就把你之前编进去的第三方模块全丢了。</p>
+<p>所以只能自己编：本地把源码下齐，传进去，按老参数重新编一个二进制，最后把文件换掉。</p>
+<p>折腾了大半个晚上。三个地方卡住，记下来。</p>
+<span id="more"></span>
+
+<h2 id="为什么要升这一版"><a href="#为什么要升这一版" class="headerlink" title="为什么要升这一版"></a>为什么要升这一版</h2><p>不是想用新功能，是补漏洞。</p>
+<p>Nginx 在 1.30.7 和 1.31.9 这两个版本线上同时修了同一批问题，官方公告里写的是 <code>Not vulnerable: 1.31.9+, 1.30.7+</code>。落到这台机器上，真正要命的是这三条：</p>
+<table>
+<thead>
+<tr>
+<th align="left">CVE</th>
+<th align="left">问题</th>
+<th align="left">级别</th>
+<th align="left">影响范围</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="left">CVE-2026-123007</td>
+<td align="left">HTTP&#x2F;2 流控内存破坏</td>
+<td align="left">严重</td>
+<td align="left">1.9.5 – 1.31.8</td>
+</tr>
+<tr>
+<td align="left">CVE-2026-118899</td>
+<td align="left">TLS 1.3 下读请求体死循环</td>
+<td align="left">严重</td>
+<td align="left">1.13.0 – 1.31.8</td>
+</tr>
+<tr>
+<td align="left">CVE-2026-123633</td>
+<td align="left">HTTP&#x2F;2 释放后使用</td>
+<td align="left">中</td>
+<td align="left">1.19.7 – 1.31.8</td>
+</tr>
+</tbody></table>
+<p><code>ssl</code> 和 <code>http_v2</code> 都开着，等于摆在公网上。同一批里还有几条，只影响 mail 模块、http_v3、stream 的，这台机器都没编进去，就不管了。</p>
+<p>另外宝塔那个二进制本来就落后好几个版本，这次一步跳到 1.30.7，中间那几批补丁也算一起补上了。</p>
+<p>升完只认 <code>nginx -v</code>，面板软件商店里的版本号不会跟着变，别被它吓一跳。</p>
+<h2 id="先把旧参数留下来"><a href="#先把旧参数留下来" class="headerlink" title="先把旧参数留下来"></a>先把旧参数留下来</h2><p>这一步最要紧。</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">/www/server/nginx/sbin/nginx -V &gt; /tmp/nginx-V.txt 2&gt;&amp;1</span><br><span class="line"><span class="built_in">cat</span> /tmp/nginx-V.txt</span><br></pre></td></tr></table></figure>
+
+<p>翻一眼输出，能看到参数里模块是这么写的：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">--add-module=srclib/ngx_devel_kit</span><br><span class="line">--add-module=srclib/lua_nginx_module</span><br><span class="line">--add-module=srclib/ngx_cache_purge</span><br><span class="line">--add-module=srclib/nginx-dav-ext-module</span><br><span class="line">--add-module=srclib/nginx-sticky-module</span><br><span class="line">--with-openssl=srclib/openssl</span><br><span class="line">--with-pcre=srclib/pcre-8.43</span><br><span class="line">--with-ipv6</span><br></pre></td></tr></table></figure>
+
+<p><code>srclib</code> 是相对路径，意思是”模块源码放在构建目录下的 srclib 里”，宝塔编译时的习惯。等我在新源码目录里重新 configure，这些路径一个都不存在，configure 直接退出来。</p>
+<p>这就是第一个要动的地方。</p>
+<h2 id="备份"><a href="#备份" class="headerlink" title="备份"></a>备份</h2><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line">TS=$(<span class="built_in">date</span> +%Y%m%d%H%M%S)</span><br><span class="line"><span class="built_in">mkdir</span> -p /www/backup/nginx_<span class="variable">$TS</span></span><br><span class="line"></span><br><span class="line"><span class="built_in">cp</span> -a /www/server/nginx/sbin/nginx /www/backup/nginx_<span class="variable">$TS</span>/nginx.bin</span><br><span class="line"><span class="built_in">cp</span> -a /www/server/nginx/conf /www/backup/nginx_<span class="variable">$TS</span>/conf</span><br><span class="line"><span class="built_in">cp</span> -a /www/server/panel/vhost/nginx /www/backup/nginx_<span class="variable">$TS</span>/vhost_nginx</span><br><span class="line"><span class="built_in">cp</span> -a /tmp/nginx-V.txt /www/backup/nginx_<span class="variable">$TS</span>/</span><br><span class="line"></span><br><span class="line"><span class="built_in">cp</span> -a /www/server/nginx/sbin/nginx /www/server/nginx/sbin/nginx.bak.<span class="variable">$TS</span></span><br><span class="line"><span class="built_in">ls</span> -l /www/server/nginx/sbin/nginx.bak.<span class="variable">$TS</span></span><br></pre></td></tr></table></figure>
+
+<p>最后那两行是我第二次才补上的。第一版脚本里只 <code>echo</code> 了 <code>nginx.bak.$TS</code> 这个路径，看起来挺周全，其实文件根本没生成，等真要回滚才发现。</p>
+<p><code>$TS</code> 抄进变更单，回滚要用。</p>
+<h2 id="编-LuaJIT"><a href="#编-LuaJIT" class="headerlink" title="编 LuaJIT"></a>编 LuaJIT</h2><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line"><span class="built_in">mkdir</span> -p /www/server/nginx/src &amp;&amp; <span class="built_in">cd</span> /www/server/nginx/src</span><br><span class="line">tar -zxf /www/luajit_2.1.0~beta3+dfsg.orig.tar.gz</span><br><span class="line"><span class="built_in">cd</span> luajit-2.1.0~beta3+dfsg.orig</span><br><span class="line"></span><br><span class="line">make -j$(<span class="built_in">nproc</span>)</span><br><span class="line">make install PREFIX=/usr/local/luajit</span><br><span class="line"></span><br><span class="line"><span class="built_in">ls</span> /usr/local/luajit/bin/</span><br><span class="line"><span class="built_in">ln</span> -sf /usr/local/luajit/bin/luajit-2.1.0-beta3 /usr/local/luajit/bin/luajit</span><br><span class="line"></span><br><span class="line"><span class="built_in">echo</span> <span class="string">&#x27;/usr/local/luajit/lib&#x27;</span> &gt; /etc/ld.so.conf.d/luajit.conf</span><br><span class="line">ldconfig</span><br><span class="line">/usr/local/luajit/bin/luajit -v</span><br></pre></td></tr></table></figure>
+
+<p><code>ls</code> 那一行别省。这个包的二进制叫 <code>luajit-2.1.0-beta3</code>，不叫 <code>luajit</code>，直接写软链会指向一个不存在的文件，等到 configure 时才报出来，还得绕回来找原因。</p>
+<h2 id="模块源码和-lua-运行库"><a href="#模块源码和-lua-运行库" class="headerlink" title="模块源码和 lua 运行库"></a>模块源码和 lua 运行库</h2><p>要用的包一共八个，全传 <code>/www</code> 下：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">nginx-1.30.7.tar.gz</span><br><span class="line">ngx_devel_kit-0.3.4.tar.gz</span><br><span class="line">lua-nginx-module-0.10.29.tar.gz</span><br><span class="line">ngx_cache_purge-2.3.tar.gz</span><br><span class="line">nginx-dav-ext-module-3.0.0.tar.gz</span><br><span class="line">lua-resty-core-0.1.32.tar.gz</span><br><span class="line">lua-resty-lrucache-0.13.tar.gz</span><br><span class="line">luajit_2.1.0~beta3+dfsg.orig.tar.gz</span><br></pre></td></tr></table></figure>
+
+<p>只有 nginx 主源码放 <code>/www/server/install_package</code>，其余都在 <code>/www</code> 根下。</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br></pre></td><td class="code"><pre><span class="line"><span class="built_in">cd</span> /www/server/nginx/src</span><br><span class="line">tar -zxf /www/ngx_devel_kit-0.3.4.tar.gz</span><br><span class="line">tar -zxf /www/lua-nginx-module-0.10.29.tar.gz</span><br><span class="line">tar -zxf /www/ngx_cache_purge-2.3.tar.gz</span><br><span class="line">tar -zxf /www/nginx-dav-ext-module-3.0.0.tar.gz</span><br><span class="line"></span><br><span class="line"><span class="built_in">cd</span> /www/server/install_package</span><br><span class="line">tar -zxf /www/nginx-1.30.7.tar.gz</span><br><span class="line"></span><br><span class="line"><span class="built_in">cd</span> /www</span><br><span class="line">tar -zxf lua-resty-lrucache-0.13.tar.gz</span><br><span class="line">tar -zxf lua-resty-core-0.1.32.tar.gz</span><br><span class="line"></span><br><span class="line"><span class="built_in">cd</span> lua-resty-lrucache-0.13</span><br><span class="line">make install LUA_LIB_DIR=/usr/local/luajit/share/lua/5.1</span><br><span class="line"><span class="built_in">cd</span> ../lua-resty-core-0.1.32</span><br><span class="line">make install LUA_LIB_DIR=/usr/local/luajit/share/lua/5.1</span><br></pre></td></tr></table></figure>
+
+<p>lrucache 要在 core 前面装，core 依赖它。</p>
+<h3 id="坑一：lua-resty-core-的版本必须跟着-lua-nginx-module"><a href="#坑一：lua-resty-core-的版本必须跟着-lua-nginx-module" class="headerlink" title="坑一：lua-resty-core 的版本必须跟着 lua-nginx-module"></a>坑一：lua-resty-core 的版本必须跟着 lua-nginx-module</h3><p>我先拿的是 0.1.31，编完启动直接报错：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">lua entry thread aborted: runtime error:</span><br><span class="line">.../resty/core/base.lua: ngx_http_lua_module 0.10.28 required</span><br></pre></td></tr></table></figure>
+
+<p>可我编进去的明明是 0.10.29，怎么还嫌版本不对。</p>
+<p>翻 <code>resty/core/base.lua</code> 才看明白：</p>
+<figure class="highlight lua"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">if</span> <span class="keyword">not</span> ngx.<span class="built_in">config</span>.ngx_lua_version</span><br><span class="line">   <span class="keyword">or</span> ngx.<span class="built_in">config</span>.ngx_lua_version ~= <span class="number">10028</span></span><br><span class="line"><span class="keyword">then</span></span><br><span class="line">    <span class="built_in">error</span>(<span class="string">&quot;ngx_http_lua_module 0.10.28 required&quot;</span>)</span><br><span class="line"><span class="keyword">end</span></span><br></pre></td></tr></table></figure>
+
+<p>判断用的是 <code>~=</code>，精确相等。<code>10028</code> 就是 0.10.28 去掉小数点。换成 0.1.32 之后这段变成 <code>~= 10029</code>，才和 0.10.29 对上。</p>
+<p>所以这俩是绑死的：0.10.29 配 0.1.32。以后再升，先 grep 一下这个魔数，别猜：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">grep -o <span class="string">&#x27;ngx_http_lua_version ~= [0-9]*&#x27;</span> /usr/local/luajit/share/lua/5.1/resty/core/base.lua</span><br></pre></td></tr></table></figure>
+
+<h3 id="lua-库不在默认路径的话，还要改-nginx-conf"><a href="#lua-库不在默认路径的话，还要改-nginx-conf" class="headerlink" title="lua 库不在默认路径的话，还要改 nginx.conf"></a>lua 库不在默认路径的话，还要改 nginx.conf</h3><p><code>LUA_LIB_DIR</code> 指的 <code>/usr/local/luajit/share/lua/5.1</code> 不在 luajit 的默认搜索路径里，得在 <code>http &#123;&#125;</code> 里补一行：</p>
+<figure class="highlight nginx"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="attribute">lua_package_path</span> <span class="string">&quot;/usr/local/luajit/share/lua/5.1/?.lua;/usr/local/luajit/share/lua/5.1/?/init.lua;;&quot;</span>;</span><br></pre></td></tr></table></figure>
+
+<p>末尾那两个分号是”再追加默认路径”的意思，少写会漏掉别的模块。</p>
+<p>这行改动记得算进回滚范围，旧二进制不带这行配置，回滚时要一起还原。</p>
+<h2 id="换编译参数"><a href="#换编译参数" class="headerlink" title="换编译参数"></a>换编译参数</h2><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br></pre></td><td class="code"><pre><span class="line"><span class="built_in">cd</span> /www/server/install_package/nginx-1.30.7</span><br><span class="line"></span><br><span class="line">OLD=$(/www/server/nginx/sbin/nginx -V 2&gt;&amp;1 | sed -n <span class="string">&#x27;s/^configure arguments: //p&#x27;</span>)</span><br><span class="line"></span><br><span class="line">NEW=$(<span class="built_in">echo</span> <span class="string">&quot;<span class="variable">$OLD</span>&quot;</span> | sed \</span><br><span class="line">  -e <span class="string">&#x27;s#--add-module=srclib/ngx_devel_kit#--add-module=/www/server/nginx/src/ngx_devel_kit-0.3.4#g&#x27;</span> \</span><br><span class="line">  -e <span class="string">&#x27;s#--add-module=srclib/lua_nginx_module#--add-module=/www/server/nginx/src/lua-nginx-module-0.10.29#g&#x27;</span> \</span><br><span class="line">  -e <span class="string">&#x27;s#--add-module=srclib/ngx_cache_purge#--add-module=/www/server/nginx/src/ngx_cache_purge-2.3#g&#x27;</span> \</span><br><span class="line">  -e <span class="string">&#x27;s#--add-module=srclib/nginx-dav-ext-module#--add-module=/www/server/nginx/src/nginx-dav-ext-module-3.0.0#g&#x27;</span> \</span><br><span class="line">  -e <span class="string">&#x27;s#--add-module=srclib/nginx-sticky-module##g&#x27;</span> \</span><br><span class="line">  -e <span class="string">&#x27;s#--with-openssl=srclib/[^ ]*##g&#x27;</span> \</span><br><span class="line">  -e <span class="string">&#x27;s#--with-pcre=srclib/[^ ]*##g&#x27;</span> \</span><br><span class="line">  -e <span class="string">&#x27;s#--with-ipv6##g&#x27;</span> | <span class="built_in">tr</span> -s <span class="string">&#x27; &#x27;</span>)</span><br><span class="line"></span><br><span class="line"><span class="built_in">echo</span> <span class="string">&quot;<span class="variable">$NEW</span>&quot;</span></span><br></pre></td></tr></table></figure>
+
+<p>改完看一眼，别带着相对路径往下走：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="built_in">echo</span> <span class="string">&quot;<span class="variable">$NEW</span>&quot;</span> | <span class="built_in">tr</span> <span class="string">&#x27; &#x27;</span> <span class="string">&#x27;\n&#x27;</span> | grep -- --add-module</span><br><span class="line"><span class="built_in">echo</span> <span class="string">&quot;<span class="variable">$NEW</span>&quot;</span> | grep -E <span class="string">&#x27;srclib|with-ipv6&#x27;</span> || <span class="built_in">echo</span> 干净</span><br></pre></td></tr></table></figure>
+
+<p><code>--with-ipv6</code> 得删。1.25 之后这选项没了（IPv6 默认开），留着 configure 会报 invalid option。<code>--with-openssl</code> 和 <code>--with-pcre</code> 指向源码树里自带的那份，这次没 HTTP&#x2F;3 需求，删掉用系统的 libssl、libpcre 就行。</p>
+<h3 id="坑二：sticky-模块跟-1-30-7-编不过"><a href="#坑二：sticky-模块跟-1-30-7-编不过" class="headerlink" title="坑二：sticky 模块跟 1.30.7 编不过"></a>坑二：sticky 模块跟 1.30.7 编不过</h3><p>老参数里有 <code>nginx-sticky-module</code>，我把 <code>nginx-goodies-nginx-sticky-module-ng</code> 下下来了，make 阶段炸，报错大意是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">error: &#x27;ngx_http_headers_in_t&#x27; has no member named &#x27;cookies&#x27;</span><br></pre></td></tr></table></figure>
+
+<p>这模块直接改 Nginx 内部的请求头结构体，属于深度侵入，版本一跳就没了。</p>
+<p>好在这功能官方早收编了：Nginx 1.29.6 起原生支持 <code>sticky cookie</code>，upstream 会话保持不用再靠第三方模块。我查了下现有配置里压根没用 sticky 指令，参数删掉，业务无感。</p>
+<p>顺带一句经验，改 Nginx 内部结构体的模块，跨大版本基本都要重写；像 cache_purge、dav-ext 这种只做 filter 的，活得久得多。</p>
+<h2 id="configure-和-make"><a href="#configure-和-make" class="headerlink" title="configure 和 make"></a>configure 和 make</h2><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line"><span class="built_in">cd</span> /www/server/install_package/nginx-1.30.7</span><br><span class="line"><span class="built_in">export</span> LUAJIT_LIB=/usr/local/luajit/lib</span><br><span class="line"><span class="built_in">export</span> LUAJIT_INC=/usr/local/luajit/include/luajit-2.1</span><br><span class="line"></span><br><span class="line">./configure <span class="variable">$NEW</span></span><br><span class="line">make -j$(<span class="built_in">nproc</span>)</span><br></pre></td></tr></table></figure>
+
+<p>configure 跑完看三处：四行 <code>adding module in /www/server/nginx/src/...</code>、summary 里用的是 system PCRE&#x2F;OpenSSL&#x2F;zlib、<code>nginx path prefix</code> 还是 <code>/www/server/nginx</code>。三样都对，基本就没问题。</p>
+<p>make 完的产物在 <code>objs/nginx</code>。</p>
+<h3 id="坑三：参数里带引号会被切坏"><a href="#坑三：参数里带引号会被切坏" class="headerlink" title="坑三：参数里带引号会被切坏"></a>坑三：参数里带引号会被切坏</h3><p>这条我没撞上，是后来写脚本时才意识到的。</p>
+<p>上面那种 <code>$(echo &quot;$OLD&quot; | sed ...)</code> 拼字符串的做法，如果旧参数里有 <code>--with-cc-opt=&#39;-O2 -g -pipe&#39;</code> 这种带引号的多词选项，交给 shell 时会按空格切成两个参数，configure 就报参数错误。我这台没有 cc-opt，所以 sed 够用；要是你那台有，别用这种拼法，老老实实按 token 逐个处理。</p>
+<h2 id="换上去"><a href="#换上去" class="headerlink" title="换上去"></a>换上去</h2><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="built_in">cp</span> objs/nginx /www/server/nginx/sbin/nginx.new</span><br><span class="line"><span class="built_in">chmod</span> 755 /www/server/nginx/sbin/nginx.new</span><br><span class="line">/www/server/nginx/sbin/nginx.new -t</span><br></pre></td></tr></table></figure>
+
+<p>必须看到 <code>test is successful</code>。</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">TS=$(<span class="built_in">date</span> +%Y%m%d%H%M%S)</span><br><span class="line"><span class="built_in">mv</span> /www/server/nginx/sbin/nginx /www/server/nginx/sbin/nginx.bak.<span class="variable">$TS</span></span><br><span class="line"><span class="built_in">mv</span> /www/server/nginx/sbin/nginx.new /www/server/nginx/sbin/nginx</span><br><span class="line"><span class="built_in">chmod</span> 755 /www/server/nginx/sbin/nginx</span><br><span class="line"></span><br><span class="line">/etc/init.d/nginx restart</span><br><span class="line">/www/server/nginx/sbin/nginx -v</span><br><span class="line">curl -I http://127.0.0.1</span><br><span class="line"><span class="built_in">tail</span> -30 /www/server/nginx/logs/error.log</span><br></pre></td></tr></table></figure>
+
+<p>文件名不能改，宝塔的服务脚本和面板都按 <code>sbin/nginx</code> 这个路径调用。</p>
+<p>还有一点，<code>-t</code> 过了不等于能跑。它只查语法和文件在不在，lua 运行时不管。我那次 resty.core 版本不对，<code>-t</code> 一路通过，重启之后才炸。所以 curl 和 error.log 这两步别省。</p>
+<h2 id="回滚"><a href="#回滚" class="headerlink" title="回滚"></a>回滚</h2><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="built_in">ls</span> -1t /www/server/nginx/sbin/nginx.bak.*</span><br></pre></td></tr></table></figure>
+
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">TS=20261123105540</span><br><span class="line"><span class="built_in">mv</span> /www/server/nginx/sbin/nginx /www/server/nginx/sbin/nginx.failed.<span class="variable">$TS</span></span><br><span class="line"><span class="built_in">cp</span> -a /www/server/nginx/sbin/nginx.bak.<span class="variable">$TS</span> /www/server/nginx/sbin/nginx</span><br><span class="line"><span class="built_in">chmod</span> 755 /www/server/nginx/sbin/nginx</span><br><span class="line">/etc/init.d/nginx restart</span><br></pre></td></tr></table></figure>
+
+<p>一分钟的事，前提是备份真在。</p>
+<p>写到这里，其实最有用的不是那串 sed，是”把旧参数和旧二进制完整留下来”这个动作。有它在，最坏也就是重启一次，退回原样。</p>
+
+    </div>
+
+    
+    
+    
+<div>
+    
+        <div style="text-align:center;color: #ccc;font-size:14px;">-------------　　　　本文结束　<i class="fa fa-flag"></i>　感谢阅读　　　　-------------</div>
+    
+</div>
+        
+
+<div>
+<ul class="post-copyright">
+  <li class="post-copyright-author">
+    <strong>本文作者： </strong>王宁
+  </li>
+  <li class="post-copyright-link">
+    <strong>本文链接：</strong>
+    <a href="https://blog.babynan.top/2026/11/231130/" title="宝塔上的 Nginx 升到 1.30.7，修复高危漏洞">https://blog.babynan.top/2026/11/231130/</a>
+  </li>
+  <li class="post-copyright-license">
+    <strong>版权声明： </strong>本博客所有文章除特别声明外，均采用 <span class="exturl" data-url="aHR0cHM6Ly9jcmVhdGl2ZWNvbW1vbnMub3JnL2xpY2Vuc2VzL2J5LW5jLXNhLzQuMC9kZWVkLnpoLWhhbnM="><i class="fab fa-fw fa-creative-commons"></i>BY-NC-SA</span> 许可协议。转载请注明出处！
+  </li>
+</ul>
+</div>
+
+        
+
+  <div class="followme">
+    <p>欢迎关注我的其它发布渠道</p>
+
+    <div class="social-list">
+
+        <div class="social-item">
+          <a target="_blank" class="social-link" href="/atom.xml">
+            <span class="icon">
+              <i class="fa fa-rss"></i>
+            </span>
+
+            <span class="label">RSS</span>
+          </a>
+        </div>
+
+        <div class="social-item">
+          <a target="_blank" class="social-link" href="mailto:wxs_code@126.com">
+            <span class="icon">
+              <i class="fas fa-envelope"></i>
+            </span>
+
+            <span class="label">Email</span>
+          </a>
+        </div>
+    </div>
+  </div>
+
+
+      <footer class="post-footer">
+          
+          <div class="post-tags">
+              <a href="/tags/nginx/" rel="tag"><i class="fa fa-tag"></i> nginx</a>
+              <a href="/tags/lua/" rel="tag"><i class="fa fa-tag"></i> lua</a>
+              <a href="/tags/luajit/" rel="tag"><i class="fa fa-tag"></i> luajit</a>
+              <a href="/tags/%E5%AE%9D%E5%A1%94%E9%9D%A2%E6%9D%BF/" rel="tag"><i class="fa fa-tag"></i> 宝塔面板</a>
+              <a href="/tags/%E8%B8%A9%E5%9D%91%E8%AE%B0%E5%BD%95/" rel="tag"><i class="fa fa-tag"></i> 踩坑记录</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2026/07/311502/" rel="prev" title="Docker容器访问宝塔MySQL超时问题排查与解决实战">
+      <i class="fa fa-chevron-left"></i> Docker容器访问宝塔MySQL超时问题排查与解决实战
+    </a></div>
+      <div class="post-nav-item"></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+
+
+          </div>
+          
+    
+  <div class="comments">
+    <div id="disqus_thread">
+      <noscript>Please enable JavaScript to view the comments powered by Disqus.</noscript>
+    </div>
+  </div>
+  
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let { activeClass } = CONFIG.comments;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#%E4%B8%BA%E4%BB%80%E4%B9%88%E8%A6%81%E5%8D%87%E8%BF%99%E4%B8%80%E7%89%88"><span class="nav-number">1.</span> <span class="nav-text">为什么要升这一版</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E5%85%88%E6%8A%8A%E6%97%A7%E5%8F%82%E6%95%B0%E7%95%99%E4%B8%8B%E6%9D%A5"><span class="nav-number">2.</span> <span class="nav-text">先把旧参数留下来</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E5%A4%87%E4%BB%BD"><span class="nav-number">3.</span> <span class="nav-text">备份</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E7%BC%96-LuaJIT"><span class="nav-number">4.</span> <span class="nav-text">编 LuaJIT</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E6%A8%A1%E5%9D%97%E6%BA%90%E7%A0%81%E5%92%8C-lua-%E8%BF%90%E8%A1%8C%E5%BA%93"><span class="nav-number">5.</span> <span class="nav-text">模块源码和 lua 运行库</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#%E5%9D%91%E4%B8%80%EF%BC%9Alua-resty-core-%E7%9A%84%E7%89%88%E6%9C%AC%E5%BF%85%E9%A1%BB%E8%B7%9F%E7%9D%80-lua-nginx-module"><span class="nav-number">5.1.</span> <span class="nav-text">坑一：lua-resty-core 的版本必须跟着 lua-nginx-module</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#lua-%E5%BA%93%E4%B8%8D%E5%9C%A8%E9%BB%98%E8%AE%A4%E8%B7%AF%E5%BE%84%E7%9A%84%E8%AF%9D%EF%BC%8C%E8%BF%98%E8%A6%81%E6%94%B9-nginx-conf"><span class="nav-number">5.2.</span> <span class="nav-text">lua 库不在默认路径的话，还要改 nginx.conf</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E6%8D%A2%E7%BC%96%E8%AF%91%E5%8F%82%E6%95%B0"><span class="nav-number">6.</span> <span class="nav-text">换编译参数</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#%E5%9D%91%E4%BA%8C%EF%BC%9Asticky-%E6%A8%A1%E5%9D%97%E8%B7%9F-1-30-7-%E7%BC%96%E4%B8%8D%E8%BF%87"><span class="nav-number">6.1.</span> <span class="nav-text">坑二：sticky 模块跟 1.30.7 编不过</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#configure-%E5%92%8C-make"><span class="nav-number">7.</span> <span class="nav-text">configure 和 make</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#%E5%9D%91%E4%B8%89%EF%BC%9A%E5%8F%82%E6%95%B0%E9%87%8C%E5%B8%A6%E5%BC%95%E5%8F%B7%E4%BC%9A%E8%A2%AB%E5%88%87%E5%9D%8F"><span class="nav-number">7.1.</span> <span class="nav-text">坑三：参数里带引号会被切坏</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E6%8D%A2%E4%B8%8A%E5%8E%BB"><span class="nav-number">8.</span> <span class="nav-text">换上去</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E5%9B%9E%E6%BB%9A"><span class="nav-number">9.</span> <span class="nav-text">回滚</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+    <img class="site-author-image" itemprop="image" alt="王宁"
+      src="https://imgbed.babynan.top/file/default/J3n4pZXy.png">
+  <p class="site-author-name" itemprop="name">王宁</p>
+  <div class="site-description" itemprop="description">知行合一</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">7</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">8</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">23</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+  <div class="links-of-author motion-element">
+      <span class="links-of-author-item">
+        <span class="exturl" data-url="aHR0cHM6Ly9naXRodWIuY29tL3hzd2FuZ2NvZGU=" title="GitHub → https:&#x2F;&#x2F;github.com&#x2F;xswangcode"><i class="fab fa-github fa-fw"></i>GitHub</span>
+      </span>
+      <span class="links-of-author-item">
+        <span class="exturl" data-url="bWFpbHRvOnd4c19jb2RlQDEyNi5jb20=" title="E-Mail → mailto:wxs_code@126.com"><i class="fa fa-envelope fa-fw"></i>E-Mail</span>
+      </span>
+      <span class="links-of-author-item">
+        <span class="exturl" data-url="aHR0cHM6Ly9pbWdiZWQuYmFieW5hbi50b3AvZmlsZS8xNzUwODMzMzMwMTg0X2ltYWdlLnBuZw==" title="WeChat → https:&#x2F;&#x2F;imgbed.babynan.top&#x2F;file&#x2F;1750833330184_image.png"><i class="fab fa-weixin fa-fw"></i>WeChat</span>
+      </span>
+      <span class="links-of-author-item">
+        <a href="/atom.xml" title="RSS → &#x2F;atom.xml"><i class="fa fa-rss fa-fw"></i>RSS</a>
+      </span>
+  </div>
+
+
+  <div class="links-of-blogroll motion-element">
+    <div class="links-of-blogroll-title"><i class="fa fa-link fa-fw"></i>
+      友链
+    </div>
+    <ul class="links-of-blogroll-list">
+        <li class="links-of-blogroll-item">
+          <span class="exturl" data-url="aHR0cHM6Ly9ob21lLmJhYnluYW4udG9wLw==" title="https:&#x2F;&#x2F;home.babynan.top&#x2F;">导航页</span>
+        </li>
+        <li class="links-of-blogroll-item">
+          <span class="exturl" data-url="aHR0cHM6Ly9naXRodWIuY29tL3RoZW1lLW5leHQvaGV4by10aGVtZS1uZXh0" title="https:&#x2F;&#x2F;github.com&#x2F;theme-next&#x2F;hexo-theme-next">博客主题</span>
+        </li>
+        <li class="links-of-blogroll-item">
+          <span class="exturl" data-url="aHR0cHM6Ly94c3dhbmdjb2RlLmdpdGh1Yi5pby8=" title="https:&#x2F;&#x2F;xswangcode.github.io&#x2F;">github源</span>
+        </li>
+        <li class="links-of-blogroll-item">
+          <span class="exturl" data-url="aHR0cHM6Ly94c3dhbmcucGFnZXMuZGV2Lw==" title="https:&#x2F;&#x2F;xswang.pages.dev&#x2F;">cloudflare源</span>
+        </li>
+    </ul>
+  </div>
+
+      </div>
+        <div class="back-to-top motion-element">
+          <i class="fa fa-arrow-up"></i>
+          <span>0%</span>
+        </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+        
+
+<div class="copyright">
+  
+  &copy; 2024 – 
+  <span itemprop="copyrightYear">2026</span>
+  <span class="with-love">
+    <i class="fa fa-heart"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">王宁</span>
+    <span class="post-meta-divider">|</span>
+    <span class="post-meta-item-icon">
+      <i class="fa fa-chart-area"></i>
+    </span>
+      <span class="post-meta-item-text">站点总字数：</span>
+    <span title="站点总字数">10k</span>
+    <span class="post-meta-divider">|</span>
+    <span class="post-meta-item-icon">
+      <i class="fa fa-coffee"></i>
+    </span>
+      <span class="post-meta-item-text">站点阅读时长 &asymp;</span>
+    <span title="站点阅读时长">38 分钟</span>
+</div>
+  <div class="powered-by">由 <span class="exturl theme-link" data-url="aHR0cHM6Ly9oZXhvLmlv">Hexo</span> & <span class="exturl theme-link" data-url="aHR0cHM6Ly90aGVtZS1uZXh0Lm9yZw==">NexT.Gemini</span> 强力驱动
+  </div>
+
+
+        
+<div class="busuanzi-count">
+  <script data-pjax async src="/lib/busuanzi/busuanzi.pure.mini.js"></script>
+    <span class="post-meta-item" id="busuanzi_container_site_uv" style="display: none;">
+      <span class="post-meta-item-icon">
+        <i class="fa fa-user"></i>
+      </span>
+      <span class="site-uv" title="总访客量">
+        <span id="busuanzi_value_site_uv"></span>
+      </span>
+    </span>
+    <span class="post-meta-divider">|</span>
+    <span class="post-meta-item" id="busuanzi_container_site_pv" style="display: none;">
+      <span class="post-meta-item-icon">
+        <i class="fa fa-eye"></i>
+      </span>
+      <span class="site-pv" title="总访问量">
+        <span id="busuanzi_value_site_pv"></span>
+      </span>
+    </span>
+</div>
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script size="400" alpha="0.6" zIndex="-1" src="/lib/canvas-ribbon/canvas-ribbon.js"></script>
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/pjax/pjax.min.js"></script>
+  <script src="/lib/jquery/jquery.min.js"></script>
+  <script src="/lib/fancybox/jquery.fancybox.min.js"></script>
+  <script src="/lib/lozad/lozad.min.js"></script>
+  <script src="/lib/pangu/pangu.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+
+<script src="/js/utils.js"></script>
+
+<script src="/js/motion.js"></script>
+
+
+<script src="/js/schemes/pisces.js"></script>
+
+
+<script src="/js/next-boot.js"></script>
+
+  <script>
+var pjax = new Pjax({
+  selectors: [
+    'head title',
+    '#page-configurations',
+    '.content-wrap',
+    '.post-toc-wrap',
+    '.languages',
+    '#pjax'
+  ],
+  switches: {
+    '.post-toc-wrap': Pjax.switches.innerHTML
+  },
+  analytics: false,
+  cacheBust: false,
+  scrollTo : !CONFIG.bookmark.enable
+});
+
+window.addEventListener('pjax:success', () => {
+  document.querySelectorAll('script[data-pjax], script#page-configurations, #pjax script').forEach(element => {
+    var code = element.text || element.textContent || element.innerHTML || '';
+    var parent = element.parentNode;
+    parent.removeChild(element);
+    var script = document.createElement('script');
+    if (element.id) {
+      script.id = element.id;
+    }
+    if (element.className) {
+      script.className = element.className;
+    }
+    if (element.type) {
+      script.type = element.type;
+    }
+    if (element.src) {
+      script.src = element.src;
+      // Force synchronous loading of peripheral JS.
+      script.async = false;
+    }
+    if (element.dataset.pjax !== undefined) {
+      script.dataset.pjax = '';
+    }
+    if (code !== '') {
+      script.appendChild(document.createTextNode(code));
+    }
+    parent.appendChild(script);
+  });
+  NexT.boot.refresh();
+  // Define Motion Sequence & Bootstrap Motion.
+  if (CONFIG.motion.enable) {
+    NexT.motion.integrator
+      .init()
+      .add(NexT.motion.middleWares.subMenu)
+      .add(NexT.motion.middleWares.postList)
+      .bootstrap();
+  }
+  NexT.utils.updateSidebarPosition();
+});
+</script>
+
+
+
+
+  
+  <script data-pjax>
+    (function(){
+      var canonicalURL, curProtocol;
+      //Get the <link> tag
+      var x=document.getElementsByTagName("link");
+		//Find the last canonical URL
+		if(x.length > 0){
+			for (i=0;i<x.length;i++){
+				if(x[i].rel.toLowerCase() == 'canonical' && x[i].href){
+					canonicalURL=x[i].href;
+				}
+			}
+		}
+    //Get protocol
+	    if (!canonicalURL){
+	    	curProtocol = window.location.protocol.split(':')[0];
+	    }
+	    else{
+	    	curProtocol = canonicalURL.split(':')[0];
+	    }
+      //Get current URL if the canonical URL does not exist
+	    if (!canonicalURL) canonicalURL = window.location.href;
+	    //Assign script content. Replace current URL with the canonical URL
+      !function(){var e=/([http|https]:\/\/[a-zA-Z0-9\_\.]+\.baidu\.com)/gi,r=canonicalURL,t=document.referrer;if(!e.test(r)){var n=(String(curProtocol).toLowerCase() === 'https')?"https://sp0.baidu.com/9_Q4simg2RQJ8t7jm9iCKT-xh_/s.gif":"//api.share.baidu.com/s.gif";t?(n+="?r="+encodeURIComponent(document.referrer),r&&(n+="&l="+r)):r&&(n+="?l="+r);var i=new Image;i.src=n}}(window);})();
+  </script>
+
+
+
+
+  
+<script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+
+    <div id="pjax">
+  
+
+  
+
+  
+  <script src="/lib/quicklink/quicklink.umd.min.js"></script>
+  <script>
+      window.addEventListener('load', () => {
+      quicklink({
+        timeout : 3000,
+        priority: true,
+        ignores : [uri => uri.includes('#'),uri => uri === 'https://blog.babynan.top/2026/11/231130/',]
+      });
+      });
+  </script>
+<script src="/lib/darkmode/darkmode-js.min.js"></script>
+
+<script>
+var options = {
+  bottom: '64px',
+  right: '48px',
+  left: 'unset',
+  time: '0.5s',
+  mixColor: 'transparent',
+  backgroundColor: 'transparent',
+  buttonColorDark: '#100f2c',
+  buttonColorLight: '#fff',
+  saveInCookies: true,
+  label: '🌓',
+  autoMatchOsTheme: true
+}
+const darkmode = new Darkmode(options);
+window.darkmode = darkmode;
+darkmode.showWidget();
+</script>
+
+<script>
+  function loadCount() {
+    var d = document, s = d.createElement('script');
+    s.src = 'https://xscodeBlog.disqus.com/count.js';
+    s.id = 'dsq-count-scr';
+    (d.head || d.body).appendChild(s);
+  }
+  // defer loading until the whole page loading is completed
+  window.addEventListener('load', loadCount, false);
+</script>
+<script>
+  var disqus_config = function() {
+    this.page.url = "https://blog.babynan.top/2026/11/231130/";
+    this.page.identifier = "2026/11/231130/";
+    this.page.title = "宝塔上的 Nginx 升到 1.30.7，修复高危漏洞";
+    };
+  NexT.utils.loadComments(document.querySelector('#disqus_thread'), () => {
+    if (window.DISQUS) {
+      DISQUS.reset({
+        reload: true,
+        config: disqus_config
+      });
+    } else {
+      var d = document, s = d.createElement('script');
+      s.src = 'https://xscodeBlog.disqus.com/embed.js';
+      s.setAttribute('data-timestamp', '' + +new Date());
+      (d.head || d.body).appendChild(s);
+    }
+  });
+</script>
+
+    </div>
+  <!-- 页面点击小红心 -->
+  <script type="text/javascript" src="/js/src/clicklove.js"></script> 
+</body>
+</html>
